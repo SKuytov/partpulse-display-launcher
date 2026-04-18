@@ -305,7 +305,7 @@ public class NativeDisplayActivity extends Activity {
                 int pdfW = pdfiumCore.getPageWidthPoint(pdfDocument, 0);
                 int pdfH = pdfiumCore.getPageHeightPoint(pdfDocument, 0);
 
-                float scale = Math.min((float) screenW / pdfW, (float) screenH / pdfH);
+                float scale = Math.min(screenW * 2.0f / pdfW, screenH * 2.0f / pdfH);
                 int bmpW = Math.max(1, Math.round(pdfW * scale));
                 int bmpH = Math.max(1, Math.round(pdfH * scale));
 
