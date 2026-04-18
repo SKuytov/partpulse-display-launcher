@@ -29,7 +29,7 @@ public class PdfPageView extends View {
         paint = new Paint();
         paint.setFilterBitmap(false);
         paint.setAntiAlias(false);
-        paint.setDither(false);
+        paint.setDither(true);           // Dither for smooth gradients
         setLayerType(LAYER_TYPE_SOFTWARE, null);
     }
 
