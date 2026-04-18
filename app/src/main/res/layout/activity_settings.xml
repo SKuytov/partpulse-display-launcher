@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0D0D1A"
+    android:orientation="vertical">
+
+    <!-- Top toolbar -->
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/settingsToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="#1A1A2E"
+        android:elevation="4dp"
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar" />
+
+    <!-- Scrollable content -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- ── DISPLAY SECTION ──────────────────────────────── -->
+            <TextView
+                style="@style/SectionHeader"
+                android:text="DISPLAY" />
+
+            <TextView style="@style/FieldLabel" android:text="Display URL" />
+            <EditText
+                android:id="@+id/etUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri"
+                android:textColor="#EEEEFF"
+                android:background="@drawable/input_bg"
+                android:padding="12dp"
+                android:textSize="15sp"
+                android:layout_marginBottom="16dp"
+                android:hint="http://192.168.0.62:5000/#/display"
+                android:textColorHint="#666688" />
+
+            <TextView style="@style/FieldLabel" android:text="Auto-refresh interval" />
+            <Spinner
+                android:id="@+id/spRefresh"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/input_bg"
+                android:layout_marginBottom="24dp" />
+
+            <View style="@style/Divider" />
+
+            <!-- ── SECURITY SECTION ─────────────────────────────── -->
+            <TextView style="@style/SectionHeader" android:text="SECURITY" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="PIN lock for Settings"
+                    android:textColor="#CCCCDD"
+                    android:textSize="15sp" />
+
+                <Switch
+                    android:id="@+id/swPinEnabled"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumbTint="#00B4D8"
+                    android:trackTint="#334455" />
+            </LinearLayout>
+
+            <!-- New PIN fields (shown when PIN enabled) -->
+            <LinearLayout
+                android:id="@+id/layoutNewPin"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView style="@style/FieldLabel" android:text="New PIN (4 digits)" />
+                <EditText
+                    android:id="@+id/etPin1"
+                    android:layout_width="160dp"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberPassword"
+                    android:maxLength="4"
+                    android:textColor="#EEEEFF"
+                    android:background="@drawable/input_bg"
+                    android:padding="12dp"
+                    android:textSize="20sp"
+                    android:letterSpacing="0.4"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView style="@style/FieldLabel" android:text="Confirm new PIN" />
+                <EditText
+                    android:id="@+id/etPin2"
+                    android:layout_width="160dp"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberPassword"
+                    android:maxLength="4"
+                    android:textColor="#EEEEFF"
+                    android:background="@drawable/input_bg"
+                    android:padding="12dp"
+                    android:textSize="20sp"
+                    android:letterSpacing="0.4"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tvPinMismatch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="PINs do not match"
+                    android:textColor="#FF4444"
+                    android:textSize="12sp"
+                    android:visibility="gone"
+                    android:layout_marginBottom="16dp" />
+            </LinearLayout>
+
+            <View style="@style/Divider" />
+
+            <!-- ── INTERFACE SECTION ────────────────────────────── -->
+            <TextView style="@style/SectionHeader" android:text="INTERFACE" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="24dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Show toolbar"
+                        android:textColor="#CCCCDD"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Auto-hides after 5 seconds"
+                        android:textColor="#666688"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swToolbar"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:thumbTint="#00B4D8"
+                    android:trackTint="#334455" />
+            </LinearLayout>
+
+            <!-- Save button -->
+            <Button
+                android:id="@+id/btnSave"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="Save Settings"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/btn_primary"
+                android:layout_marginTop="8dp" />
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

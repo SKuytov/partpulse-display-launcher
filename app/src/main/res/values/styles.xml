@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme — dark, no action bar -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">#00B4D8</item>
+        <item name="colorPrimaryDark">#0D0D1A</item>
+        <item name="colorAccent">#00B4D8</item>
+        <item name="android:windowBackground">#0D0D1A</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
+    <!-- PIN screen button — digit -->
+    <style name="PinButton">
+        <item name="android:layout_width">72dp</item>
+        <item name="android:layout_height">72dp</item>
+        <item name="android:layout_margin">6dp</item>
+        <item name="android:background">@drawable/btn_pin_digit</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">#EEEEFF</item>
+        <item name="android:textSize">24sp</item>
+        <item name="android:fontFamily">sans-serif-light</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <!-- PIN screen button — alt (CLR / backspace) -->
+    <style name="PinButtonAlt" parent="PinButton">
+        <item name="android:background">@drawable/btn_pin_alt</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">#00B4D8</item>
+    </style>
+
+    <!-- Settings — section header label -->
+    <style name="SectionHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">#00B4D8</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">0.12</item>
+        <item name="android:layout_marginBottom">12dp</item>
+        <item name="android:layout_marginTop">4dp</item>
+    </style>
+
+    <!-- Settings — field label -->
+    <style name="FieldLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">#888899</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:layout_marginBottom">4dp</item>
+    </style>
+
+    <!-- Settings — horizontal divider -->
+    <style name="Divider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:background">#22223A</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:layout_marginBottom">20dp</item>
+    </style>
+
+</resources>
