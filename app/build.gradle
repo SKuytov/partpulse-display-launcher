@@ -35,4 +35,8 @@ dependencies {
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.leanback:leanback:1.0.0'
+    // OkHttp — used by SseUpdateService to maintain the SSE connection
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // Core for NotificationCompat in SseUpdateService
+    implementation 'androidx.core:core:1.12.0'
 }

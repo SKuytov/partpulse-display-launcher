@@ -1,7 +1,10 @@
 package com.partpulse.displaylauncher;
 
 import android.annotation.SuppressLint;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,21 +23,24 @@ import androidx.appcompat.app.AppCompatActivity;
 /**
  * Full-screen kiosk WebView for Android TV.
  *
- * Improvements in this version:
- *  1. FLAG_KEEP_SCREEN_ON  — prevents screensaver / display sleep
- *  2. Smooth page load     — page is hidden until fully rendered, then
- *                            revealed with a quick fade (no more flash of
- *                            background → colours → text)
- *  3. Sharp text           — WebView forced to 100% initial scale with a
- *                            correct meta-viewport so TV pixels map 1:1
- *  4. D-pad navigation     — dispatchKeyEvent approach (unchanged from v4)
+ * Cache strategy:
+ *   - On first load / app start: LOAD_CACHE_ELSE_NETWORK
+ *     → page appears instantly from cache, no blank screen while network loads
+ *   - On SSE update event: WebView.clearCache(true) + LOAD_NO_CACHE reload
+ *     → ensures fresh content is fetched and stored as the new cache
+ *   - After SSE reload completes: back to LOAD_CACHE_ELSE_NETWORK
+ *     → subsequent auto-refreshes benefit from cache again
+ *
+ * SSE integration:
+ *   SseUpdateService runs as a foreground service and broadcasts
+ *   ACTION_CONTENT_UPDATED whenever the server pushes an SSE event.
+ *   This activity registers a BroadcastReceiver for that intent.
  */
 public class DisplayActivity extends AppCompatActivity {
 
-    private static final int  SCROLL_STEP  = 300;
+    private static final int  SCROLL_STEP   = 300;
     private static final long HIDE_DELAY_MS = 5_000;
 
-    // Toolbar cursor: 0 = Refresh, 1 = Settings
     private int     toolbarFocus   = 0;
     private boolean toolbarVisible = false;
 
@@ -49,43 +55,42 @@ public class DisplayActivity extends AppCompatActivity {
     private Runnable  refreshRunnable;
     private Handler   hideHandler;
 
-    // JS injected on every page to hide content until load is complete
-    private static final String JS_HIDE_UNTIL_READY =
-        // 1. Immediately hide the body so nothing flashes in
+    // ── SSE broadcast receiver ───────────────────────────────────────────────
+    private final BroadcastReceiver sseReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (SseUpdateService.ACTION_CONTENT_UPDATED.equals(intent.getAction())) {
+                reloadFresh();
+            }
+        }
+    };
+
+    // ── Page load JS ─────────────────────────────────────────────────────────
+    private static final String JS_HIDE =
         "document.documentElement.style.visibility='hidden';" +
         "document.documentElement.style.transition='';";
 
-    // JS injected in onPageFinished to reveal with a smooth fade
     private static final String JS_REVEAL =
         "document.documentElement.style.transition='opacity 0.3s ease';" +
         "document.documentElement.style.opacity='0';" +
         "document.documentElement.style.visibility='visible';" +
         "setTimeout(function(){ document.documentElement.style.opacity='1'; }, 30);";
 
-    // JS injected to fix viewport for sharp rendering on TV
-    // Forces the page to fill the screen at 1:1 pixel ratio
     private static final String JS_FIX_VIEWPORT =
         "(function(){" +
-        "  var m = document.querySelector('meta[name=viewport]');" +
-        "  var c = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';" +
-        "  if(m){ m.setAttribute('content', c); }" +
-        "  else {" +
-        "    var n = document.createElement('meta');" +
+        "  var m=document.querySelector('meta[name=viewport]');" +
+        "  var c='width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no';" +
+        "  if(m){ m.setAttribute('content',c); } else {" +
+        "    var n=document.createElement('meta');" +
         "    n.name='viewport'; n.content=c;" +
-        "    document.head.appendChild(n);" +
-        "  }" +
+        "    document.head.appendChild(n); }" +
         "})();";
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // ── 1. KEEP SCREEN ON — prevents screensaver ────────────────────────
-        getWindow().addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        );
-
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_display);
 
         prefs          = new AppPrefs(this);
@@ -98,117 +103,163 @@ public class DisplayActivity extends AppCompatActivity {
         btnRefresh  = findViewById(R.id.btnRefresh);
         btnSettings = findViewById(R.id.btnSettings);
 
-        // ── 2. WebView config ────────────────────────────────────────────────
+        // ── WebView config ───────────────────────────────────────────────────
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setLoadWithOverviewMode(true);
         ws.setUseWideViewPort(true);
-        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        ws.setTextZoom(100);
+        // Enable app cache for offline / instant load
+        ws.setDatabaseEnabled(true);
+        // Start from cache — fastest first paint, no blank screen
+        ws.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
 
-        // ── 3. SHARP TEXT — force 100% initial scale ─────────────────────────
-        // setInitialScale(100) = 100% → 1 CSS px = 1 physical px at the
-        // WebView's logical density. Combined with the meta-viewport override
-        // injected in JS, this gives crisp rendering on large TV screens.
-        webView.setInitialScale(0);   // 0 = let the viewport meta decide
-        ws.setTextZoom(100);          // never scale text independently
-
-        // ── 4. Disable WebView's internal focus / cursor ─────────────────────
         webView.setFocusable(false);
         webView.setFocusableInTouchMode(false);
 
-        // ── 5. WebViewClient — hide-until-ready + reveal on finish ───────────
         webView.setWebViewClient(new WebViewClient() {
-
             @Override
             public void onPageStarted(WebView view, String url,
                                       android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
-                // Immediately hide to prevent flash of unstyled content
-                view.evaluateJavascript(JS_HIDE_UNTIL_READY, null);
+                view.evaluateJavascript(JS_HIDE, null);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // Fix viewport first, then reveal with fade
+                // After any load, restore normal cache mode
+                view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 view.evaluateJavascript(JS_FIX_VIEWPORT, null);
                 view.evaluateJavascript(JS_REVEAL, null);
             }
         });
         webView.setWebChromeClient(new WebChromeClient());
 
-        // ── Touch shows toolbar ──────────────────────────────────────────────
-        webView.setOnTouchListener((v, ev) -> {
-            showToolbar();
-            return false;
-        });
+        webView.setOnTouchListener((v, ev) -> { showToolbar(); return false; });
 
-        // ── Toolbar buttons ──────────────────────────────────────────────────
-        btnRefresh.setOnClickListener(v -> { webView.reload(); scheduleAutoHide(); });
+        btnRefresh.setOnClickListener(v -> { reloadFresh(); scheduleAutoHide(); });
         btnSettings.setOnClickListener(v -> openSettings());
         btnRefresh.setFocusable(false);
         btnSettings.setFocusable(false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  D-PAD — intercepted at Activity level (before WebView touches anything)
+    //  Cache-aware reload helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Normal startup load — use cache first so the screen is never blank.
+     * If the cache has the page, it shows instantly. Network fills in updates
+     * in the background (or we wait for the SSE trigger).
+     */
+    private void loadFromCache(String url) {
+        webView.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+        webView.loadUrl(url);
+    }
+
+    /**
+     * Called when the SSE service signals that content has changed,
+     * or when the user manually presses Refresh.
+     *
+     * Clears the WebView cache completely, then reloads bypassing cache
+     * so the new content is fetched and becomes the new cached version.
+     */
+    private void reloadFresh() {
+        webView.clearCache(true);
+        webView.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+        webView.reload();
+        // onPageFinished will reset cache mode back to LOAD_CACHE_ELSE_NETWORK
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Lifecycle — register/unregister SSE receiver, start/stop service
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        String url = prefs.getUrl();
+        tvUrl.setText(url);
+        loadFromCache(url);
+
+        toolbar.setVisibility(View.GONE);
+        toolbarVisible = false;
+
+        startRefreshTimer();
+
+        // Register receiver for SSE update broadcasts
+        IntentFilter filter = new IntentFilter(SseUpdateService.ACTION_CONTENT_UPDATED);
+        registerReceiver(sseReceiver, filter, RECEIVER_NOT_EXPORTED);
+
+        // Start SSE background service
+        Intent serviceIntent = new Intent(this, SseUpdateService.class);
+        startService(serviceIntent);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        stopRefreshTimer();
+        hideHandler.removeCallbacksAndMessages(null);
+
+        // Unregister receiver (re-registered in onResume)
+        try { unregisterReceiver(sseReceiver); } catch (Exception ignored) {}
+
+        // Keep service running so SSE stays alive even when screen is off
+        // (the service is foreground so the OS won't kill it)
+    }
+
+    @Override
+    public void onBackPressed() { /* handled in dispatchKeyEvent */ }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  D-PAD — intercepted at Activity level
     // ─────────────────────────────────────────────────────────────────────────
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event);
-
         int kc = event.getKeyCode();
-
-        if (kc == KeyEvent.KEYCODE_MENU) {
-            showToolbar();
-            return true;
-        }
-
+        if (kc == KeyEvent.KEYCODE_MENU) { showToolbar(); return true; }
         return toolbarVisible ? handleKeyWithToolbar(kc) : handleKeyInWebView(kc);
     }
 
     private boolean handleKeyWithToolbar(int kc) {
         switch (kc) {
-            case KeyEvent.KEYCODE_DPAD_LEFT:
-                toolbarFocus = 0; highlightToolbar(); scheduleAutoHide(); return true;
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-                toolbarFocus = 1; highlightToolbar(); scheduleAutoHide(); return true;
-            case KeyEvent.KEYCODE_DPAD_DOWN:
-                hideToolbar(); return true;
-            case KeyEvent.KEYCODE_DPAD_UP:
-                scheduleAutoHide(); return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:   toolbarFocus = 0; highlightToolbar(); scheduleAutoHide(); return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:  toolbarFocus = 1; highlightToolbar(); scheduleAutoHide(); return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:   hideToolbar(); return true;
+            case KeyEvent.KEYCODE_DPAD_UP:     scheduleAutoHide(); return true;
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_BUTTON_A:
-                if (toolbarFocus == 0) { webView.reload(); scheduleAutoHide(); }
+                if (toolbarFocus == 0) { reloadFresh(); scheduleAutoHide(); }
                 else openSettings();
                 return true;
-            case KeyEvent.KEYCODE_BACK:
-                hideToolbar(); return true;
-            default:
-                return true;
+            case KeyEvent.KEYCODE_BACK:        hideToolbar(); return true;
+            default:                           return true;
         }
     }
 
     private boolean handleKeyInWebView(int kc) {
         switch (kc) {
-            case KeyEvent.KEYCODE_DPAD_UP:    jsScroll(0, -SCROLL_STEP);  return true;
-            case KeyEvent.KEYCODE_DPAD_DOWN:  jsScroll(0, SCROLL_STEP);   return true;
-            case KeyEvent.KEYCODE_DPAD_LEFT:  jsScroll(-SCROLL_STEP, 0);  return true;
-            case KeyEvent.KEYCODE_DPAD_RIGHT: jsScroll(SCROLL_STEP, 0);   return true;
+            case KeyEvent.KEYCODE_DPAD_UP:    jsScroll(0, -SCROLL_STEP); return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:  jsScroll(0,  SCROLL_STEP); return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:  jsScroll(-SCROLL_STEP, 0); return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: jsScroll( SCROLL_STEP, 0); return true;
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
-            case KeyEvent.KEYCODE_BUTTON_A:   jsClick();                   return true;
+            case KeyEvent.KEYCODE_BUTTON_A:   jsClick(); return true;
             case KeyEvent.KEYCODE_BACK:
                 if (webView.canGoBack()) webView.goBack();
                 return true;
-            case KeyEvent.KEYCODE_MENU:
-                showToolbar(); return true;
-            default:
-                return super.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, kc));
+            case KeyEvent.KEYCODE_MENU: showToolbar(); return true;
+            default: return super.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, kc));
         }
     }
 
@@ -227,7 +278,7 @@ public class DisplayActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Toolbar helpers
+    //  Toolbar
     // ─────────────────────────────────────────────────────────────────────────
 
     private void showToolbar() {
@@ -241,8 +292,7 @@ public class DisplayActivity extends AppCompatActivity {
     private void hideToolbar() {
         toolbarVisible = false;
         toolbar.setVisibility(View.GONE);
-        btnRefresh.setAlpha(1f);
-        btnSettings.setAlpha(1f);
+        btnRefresh.setAlpha(1f); btnSettings.setAlpha(1f);
         btnRefresh.setBackgroundResource(R.drawable.btn_toolbar_selector);
         btnSettings.setBackgroundResource(R.drawable.btn_toolbar_selector);
         hideHandler.removeCallbacksAndMessages(null);
@@ -263,7 +313,7 @@ public class DisplayActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Settings / lifecycle
+    //  Settings / refresh timer
     // ─────────────────────────────────────────────────────────────────────────
 
     private void openSettings() {
@@ -278,35 +328,13 @@ public class DisplayActivity extends AppCompatActivity {
         }
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Re-apply keep-screen-on in case it was cleared
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        String url = prefs.getUrl();
-        tvUrl.setText(url);
-        webView.loadUrl(url);
-        toolbar.setVisibility(View.GONE);
-        toolbarVisible = false;
-        startRefreshTimer();
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        stopRefreshTimer();
-        hideHandler.removeCallbacksAndMessages(null);
-    }
-
-    @Override
-    public void onBackPressed() { /* handled in dispatchKeyEvent */ }
-
     private void startRefreshTimer() {
         stopRefreshTimer();
         int sec = prefs.getRefreshSeconds();
         if (sec <= 0) return;
         refreshRunnable = new Runnable() {
             @Override public void run() {
+                // Timer-based refresh uses cache — SSE handles forced refreshes
                 webView.reload();
                 refreshHandler.postDelayed(this, sec * 1000L);
             }
