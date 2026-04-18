@@ -4,17 +4,19 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- Full-screen WebView -->
+    <!-- Full-screen WebView — must be focusable so D-pad events reach it -->
     <WebView
         android:id="@+id/webView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
 
-    <!-- Floating toolbar — sits on top, auto-hides after 5 s -->
+    <!-- Floating toolbar -->
     <LinearLayout
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="52dp"
         android:layout_gravity="top"
         android:background="#CC1A1A2E"
         android:orientation="horizontal"
@@ -22,7 +24,6 @@
         android:paddingEnd="12dp"
         android:gravity="center_vertical">
 
-        <!-- PartPulse label -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -33,7 +34,6 @@
             android:fontFamily="sans-serif-medium"
             android:paddingEnd="8dp" />
 
-        <!-- Current URL display -->
         <TextView
             android:id="@+id/tvUrl"
             android:layout_width="0dp"
@@ -45,24 +45,30 @@
             android:textColor="#AAAACC"
             android:textSize="12sp" />
 
-        <!-- Refresh -->
+        <!-- Refresh button — TV-focusable -->
         <ImageButton
             android:id="@+id/btnRefresh"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/btn_toolbar_selector"
             android:src="@android:drawable/ic_menu_rotate"
             android:tint="#00B4D8"
+            android:focusable="true"
+            android:focusableInTouchMode="false"
+            android:nextFocusRight="@id/btnSettings"
             android:contentDescription="Refresh" />
 
-        <!-- Settings -->
+        <!-- Settings button — TV-focusable -->
         <ImageButton
             android:id="@+id/btnSettings"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/btn_toolbar_selector"
             android:src="@android:drawable/ic_menu_preferences"
             android:tint="#00B4D8"
+            android:focusable="true"
+            android:focusableInTouchMode="false"
+            android:nextFocusLeft="@id/btnRefresh"
             android:contentDescription="Settings" />
 
     </LinearLayout>

@@ -7,7 +7,6 @@
     android:orientation="vertical"
     android:padding="24dp">
 
-    <!-- Title -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -17,44 +16,23 @@
         android:fontFamily="sans-serif-light"
         android:layout_marginBottom="28dp" />
 
-    <!-- 4 dot indicators -->
+    <!-- 4 dot indicators (not focusable — display only) -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:layout_marginBottom="16dp">
+        android:layout_marginBottom="12dp">
 
-        <View
-            android:id="@+id/dot1"
-            android:layout_width="18dp"
-            android:layout_height="18dp"
-            android:layout_margin="8dp"
-            android:background="@drawable/dot_empty" />
-
-        <View
-            android:id="@+id/dot2"
-            android:layout_width="18dp"
-            android:layout_height="18dp"
-            android:layout_margin="8dp"
-            android:background="@drawable/dot_empty" />
-
-        <View
-            android:id="@+id/dot3"
-            android:layout_width="18dp"
-            android:layout_height="18dp"
-            android:layout_margin="8dp"
-            android:background="@drawable/dot_empty" />
-
-        <View
-            android:id="@+id/dot4"
-            android:layout_width="18dp"
-            android:layout_height="18dp"
-            android:layout_margin="8dp"
-            android:background="@drawable/dot_empty" />
-
+        <View android:id="@+id/dot1" android:layout_width="18dp" android:layout_height="18dp"
+            android:layout_margin="8dp" android:background="@drawable/dot_empty" />
+        <View android:id="@+id/dot2" android:layout_width="18dp" android:layout_height="18dp"
+            android:layout_margin="8dp" android:background="@drawable/dot_empty" />
+        <View android:id="@+id/dot3" android:layout_width="18dp" android:layout_height="18dp"
+            android:layout_margin="8dp" android:background="@drawable/dot_empty" />
+        <View android:id="@+id/dot4" android:layout_width="18dp" android:layout_height="18dp"
+            android:layout_margin="8dp" android:background="@drawable/dot_empty" />
     </LinearLayout>
 
-    <!-- Error text -->
     <TextView
         android:id="@+id/tvError"
         android:layout_width="wrap_content"
@@ -63,34 +41,46 @@
         android:textColor="#FF4444"
         android:textSize="13sp"
         android:visibility="invisible"
-        android:layout_marginBottom="24dp" />
+        android:layout_marginBottom="20dp" />
 
-    <!-- Numpad -->
+    <!-- Numpad grid — all buttons are focusable for D-pad navigation -->
     <GridLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:columnCount="3"
         android:rowCount="4">
 
-        <!-- Row 1: 1 2 3 -->
-        <TextView android:id="@+id/btn1" style="@style/PinButton" android:text="1" />
-        <TextView android:id="@+id/btn2" style="@style/PinButton" android:text="2" />
-        <TextView android:id="@+id/btn3" style="@style/PinButton" android:text="3" />
+        <!-- Row 1 -->
+        <TextView android:id="@+id/btn1" style="@style/PinButton" android:text="1"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn2" style="@style/PinButton" android:text="2"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn3" style="@style/PinButton" android:text="3"
+            android:focusable="true" android:focusableInTouchMode="false" />
 
-        <!-- Row 2: 4 5 6 -->
-        <TextView android:id="@+id/btn4" style="@style/PinButton" android:text="4" />
-        <TextView android:id="@+id/btn5" style="@style/PinButton" android:text="5" />
-        <TextView android:id="@+id/btn6" style="@style/PinButton" android:text="6" />
+        <!-- Row 2 -->
+        <TextView android:id="@+id/btn4" style="@style/PinButton" android:text="4"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn5" style="@style/PinButton" android:text="5"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn6" style="@style/PinButton" android:text="6"
+            android:focusable="true" android:focusableInTouchMode="false" />
 
-        <!-- Row 3: 7 8 9 -->
-        <TextView android:id="@+id/btn7" style="@style/PinButton" android:text="7" />
-        <TextView android:id="@+id/btn8" style="@style/PinButton" android:text="8" />
-        <TextView android:id="@+id/btn9" style="@style/PinButton" android:text="9" />
+        <!-- Row 3 -->
+        <TextView android:id="@+id/btn7" style="@style/PinButton" android:text="7"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn8" style="@style/PinButton" android:text="8"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn9" style="@style/PinButton" android:text="9"
+            android:focusable="true" android:focusableInTouchMode="false" />
 
-        <!-- Row 4: CLR 0 ← -->
-        <TextView android:id="@+id/btnClr"  style="@style/PinButtonAlt" android:text="CLR" />
-        <TextView android:id="@+id/btn0"    style="@style/PinButton"    android:text="0" />
-        <TextView android:id="@+id/btnBack" style="@style/PinButtonAlt" android:text="⌫" />
+        <!-- Row 4 -->
+        <TextView android:id="@+id/btnClr"  style="@style/PinButtonAlt" android:text="CLR"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btn0"    style="@style/PinButton"    android:text="0"
+            android:focusable="true" android:focusableInTouchMode="false" />
+        <TextView android:id="@+id/btnBack" style="@style/PinButtonAlt" android:text="⌫"
+            android:focusable="true" android:focusableInTouchMode="false" />
 
     </GridLayout>
 

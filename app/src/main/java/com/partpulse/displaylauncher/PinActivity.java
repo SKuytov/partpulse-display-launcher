@@ -2,6 +2,7 @@ package com.partpulse.displaylauncher;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.view.View;
 import android.widget.TextView;
 
@@ -9,8 +10,9 @@ import androidx.appcompat.app.AppCompatActivity;
 
 /**
  * Full-screen dark PIN entry screen.
- * Shows 4 dot indicators and a custom numpad.
- * On success navigates to the target activity specified by EXTRA_TARGET.
+ * Fully navigable with a TV remote D-pad:
+ *   - Arrow keys move between numpad buttons
+ *   - ENTER/DPAD_CENTER selects the focused button
  */
 public class PinActivity extends AppCompatActivity {
 
@@ -22,9 +24,11 @@ public class PinActivity extends AppCompatActivity {
     private final StringBuilder input = new StringBuilder();
     private AppPrefs prefs;
 
-    // Dot views
     private View dot1, dot2, dot3, dot4;
     private TextView tvError;
+
+    // Numpad button grid — row-major order (3 columns)
+    private TextView[][] grid;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -38,42 +42,64 @@ public class PinActivity extends AppCompatActivity {
         dot4    = findViewById(R.id.dot4);
         tvError = findViewById(R.id.tvError);
 
-        // Digit buttons
-        int[] digitIds = {
-            R.id.btn0, R.id.btn1, R.id.btn2, R.id.btn3,
-            R.id.btn4, R.id.btn5, R.id.btn6, R.id.btn7,
-            R.id.btn8, R.id.btn9
+        // Reference all buttons in grid order so we can wire D-pad traversal
+        grid = new TextView[][] {
+            { findViewById(R.id.btn1), findViewById(R.id.btn2), findViewById(R.id.btn3) },
+            { findViewById(R.id.btn4), findViewById(R.id.btn5), findViewById(R.id.btn6) },
+            { findViewById(R.id.btn7), findViewById(R.id.btn8), findViewById(R.id.btn9) },
+            { findViewById(R.id.btnClr), findViewById(R.id.btn0), findViewById(R.id.btnBack) },
         };
-        for (int id : digitIds) {
-            TextView btn = findViewById(id);
-            btn.setOnClickListener(v -> appendDigit(((TextView) v).getText().toString()));
+
+        // Wire click listeners
+        for (TextView[] row : grid) {
+            for (TextView btn : row) {
+                btn.setOnClickListener(v -> handleButton(((TextView) v).getText().toString()));
+                // Also respond to DPAD_CENTER / ENTER key while focused
+                btn.setOnKeyListener((v, keyCode, event) -> {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN &&
+                            (keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                                    || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                        handleButton(((TextView) v).getText().toString());
+                        return true;
+                    }
+                    return false;
+                });
+            }
         }
 
-        // CLR button — clear all
-        findViewById(R.id.btnClr).setOnClickListener(v -> {
-            input.setLength(0);
-            updateDots();
-            tvError.setVisibility(View.INVISIBLE);
-        });
-
-        // Backspace button
-        findViewById(R.id.btnBack).setOnClickListener(v -> {
-            if (input.length() > 0) {
-                input.deleteCharAt(input.length() - 1);
-                updateDots();
-                tvError.setVisibility(View.INVISIBLE);
-            }
-        });
+        // Wire D-pad focus traversal manually for the grid
+        wireFocusTraversal();
 
         updateDots();
+
+        // Start focus on button "5" (centre of numpad — ergonomic default)
+        grid[1][1].requestFocus();
     }
 
-    private void appendDigit(String digit) {
-        if (input.length() >= PIN_LENGTH) return;
-        input.append(digit);
-        updateDots();
-        if (input.length() == PIN_LENGTH) {
-            verifyPin();
+    // ── Button action ─────────────────────────────────────────────────────────
+
+    private void handleButton(String label) {
+        switch (label) {
+            case "CLR":
+                input.setLength(0);
+                updateDots();
+                tvError.setVisibility(View.INVISIBLE);
+                break;
+            case "⌫":
+                if (input.length() > 0) {
+                    input.deleteCharAt(input.length() - 1);
+                    updateDots();
+                    tvError.setVisibility(View.INVISIBLE);
+                }
+                break;
+            default:
+                // Digit
+                if (input.length() < PIN_LENGTH) {
+                    input.append(label);
+                    updateDots();
+                    if (input.length() == PIN_LENGTH) verifyPin();
+                }
+                break;
         }
     }
 
@@ -91,6 +117,49 @@ public class PinActivity extends AppCompatActivity {
         }
     }
 
+    // ── D-pad focus traversal wiring ─────────────────────────────────────────
+
+    private void wireFocusTraversal() {
+        int rows = grid.length;
+        int cols = grid[0].length;
+
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                TextView btn = grid[r][c];
+
+                // UP
+                if (r > 0) {
+                    btn.setNextFocusUpId(grid[r - 1][c].getId());
+                } else {
+                    btn.setNextFocusUpId(btn.getId()); // stay on top row
+                }
+
+                // DOWN
+                if (r < rows - 1) {
+                    btn.setNextFocusDownId(grid[r + 1][c].getId());
+                } else {
+                    btn.setNextFocusDownId(btn.getId()); // stay on bottom row
+                }
+
+                // LEFT
+                if (c > 0) {
+                    btn.setNextFocusLeftId(grid[r][c - 1].getId());
+                } else {
+                    btn.setNextFocusLeftId(grid[r][cols - 1].getId()); // wrap to end of row
+                }
+
+                // RIGHT
+                if (c < cols - 1) {
+                    btn.setNextFocusRightId(grid[r][c + 1].getId());
+                } else {
+                    btn.setNextFocusRightId(grid[r][0].getId()); // wrap to start of row
+                }
+            }
+        }
+    }
+
+    // ── Dot indicators ────────────────────────────────────────────────────────
+
     private void updateDots() {
         int len = input.length();
         setDotFilled(dot1, len >= 1);
@@ -103,8 +172,10 @@ public class PinActivity extends AppCompatActivity {
         dot.setBackgroundResource(filled ? R.drawable.dot_filled : R.drawable.dot_empty);
     }
 
+    // ── Block back ────────────────────────────────────────────────────────────
+
     @Override
     public void onBackPressed() {
-        // Prevent navigating back — user must enter the correct PIN or power-off
+        // Block — user must enter the correct PIN
     }
 }

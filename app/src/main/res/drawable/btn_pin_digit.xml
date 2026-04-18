@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_pressed="true">
+    <!-- Focused by D-pad — bright cyan fill so user can see where they are -->
+    <item android:state_focused="true">
         <shape android:shape="oval">
             <solid android:color="#00B4D8" />
+            <stroke android:width="2dp" android:color="#FFFFFF" />
             <size android:width="72dp" android:height="72dp" />
         </shape>
     </item>
-    <item android:state_focused="true">
+    <item android:state_pressed="true">
         <shape android:shape="oval">
             <solid android:color="#0090AA" />
             <size android:width="72dp" android:height="72dp" />
