@@ -96,7 +96,6 @@ public class NativeDisplayActivity extends Activity {
         setContentView(R.layout.activity_native_display);
 
         pdfCanvas           = findViewById(R.id.pdfCanvas);
-        pdfCanvas.setFilterBitmap(false);
         pdfCanvas.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         notificationOverlay = findViewById(R.id.notificationOverlay);
         notifTextPanel      = findViewById(R.id.notifTextPanel);
@@ -313,8 +312,10 @@ public class NativeDisplayActivity extends Activity {
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
 
                 main.post(() -> {
-                    pdfCanvas.setFilterBitmap(false);
                     pdfCanvas.setImageBitmap(bmp);
+                    if (pdfCanvas.getDrawable() != null) {
+                        pdfCanvas.getDrawable().setFilterBitmap(false);
+                    }
                 });
             } catch (Exception e) {
                 Log.e(TAG, "PDF render failed: " + e.getMessage());
