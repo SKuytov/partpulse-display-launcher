@@ -1,173 +1,149 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="#111111">
 
-    <!-- TOP HUD — always visible, natural height -->
+    <ImageView
+        android:id="@+id/pdfCanvas"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter"
+        android:contentDescription="@null" />
+
     <LinearLayout
-        android:id="@+id/hudOverlay"
+        android:id="@+id/notificationOverlay"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="#CC000000"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp">
-
-        <TextView
-            android:id="@+id/hudLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.07"
-            android:textColor="#FFFFFF" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:id="@+id/hudClock"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:fontFeatureSettings="tnum" />
-    </LinearLayout>
-
-    <!-- CONTENT AREA — takes remaining space -->
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <ImageView
-            android:id="@+id/pdfCanvas"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="fitCenter"
-            android:contentDescription="@null" />
+        android:background="#0b0d13"
+        android:visibility="gone">
 
         <LinearLayout
-            android:id="@+id/notificationOverlay"
-            android:layout_width="match_parent"
+            android:id="@+id/notifTextPanel"
+            android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:visibility="gone">
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:background="#1a1d27"
+            android:padding="48dp">
 
-            <LinearLayout
-                android:id="@+id/notifTextPanel"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:background="#1a1d27"
-                android:padding="48dp">
+            <TextView
+                android:id="@+id/notifTag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#3b82f6"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textAllCaps="true"
+                android:letterSpacing="0.15"
+                android:paddingBottom="24dp" />
 
-                <TextView
-                    android:id="@+id/notifTag"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="#3b82f6"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textAllCaps="true"
-                    android:letterSpacing="0.12"
-                    android:paddingBottom="12dp" />
+            <TextView
+                android:id="@+id/notifTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#e8eaf0"
+                android:textSize="36sp"
+                android:textStyle="bold"
+                android:paddingBottom="16dp" />
 
-                <TextView
-                    android:id="@+id/notifTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="#e8eaf0"
-                    android:textSize="42sp"
-                    android:textStyle="bold"
-                    android:lineSpacingMultiplier="1.1"
-                    android:paddingBottom="16dp" />
+            <TextView
+                android:id="@+id/notifBody"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#9ca3c8"
+                android:textSize="18sp"
+                android:lineSpacingExtra="4dp" />
 
-                <TextView
-                    android:id="@+id/notifBody"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="#9ca3c8"
-                    android:textSize="22sp"
-                    android:lineSpacingMultiplier="1.65" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
 
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1" />
-
-                <TextView
-                    android:id="@+id/notifDate"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="#5a6080"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <FrameLayout
-                android:id="@+id/notifImagePanel"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="0.82"
-                android:background="#0f1117"
-                android:visibility="gone">
-
-                <ImageView
-                    android:id="@+id/notifImage"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="fitCenter"
-                    android:padding="20dp"
-                    android:contentDescription="@null" />
-            </FrameLayout>
+            <TextView
+                android:id="@+id/notifDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#5a6080"
+                android:textSize="12sp" />
         </LinearLayout>
 
-        <ProgressBar
-            android:id="@+id/loadingSpinner"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:visibility="gone"
-            style="?android:attr/progressBarStyleLarge" />
+        <FrameLayout
+            android:id="@+id/notifImagePanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.82"
+            android:background="#0f1117">
 
-    </FrameLayout>
+            <ImageView
+                android:id="@+id/notifImage"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitCenter"
+                android:padding="20dp"
+                android:contentDescription="@null" />
+        </FrameLayout>
+    </LinearLayout>
 
-    <!-- BOTTOM ROW: dots -->
-    <FrameLayout
-        android:layout_width="match_parent"
+    <!-- Label pill: top-left floating -->
+    <TextView
+        android:id="@+id/hudLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="#111111">
+        android:layout_gravity="top|start"
+        android:layout_margin="10dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.08"
+        android:textColor="#FFFFFF"
+        android:maxLines="1"
+        android:ellipsize="end" />
 
-        <LinearLayout
-            android:id="@+id/dotRow"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp" />
-    </FrameLayout>
+    <!-- Clock: top-right floating -->
+    <TextView
+        android:id="@+id/hudClock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="10dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:background="#88000000"
+        android:textColor="#E0FFFFFF"
+        android:textSize="11sp"
+        android:fontFeatureSettings="tnum" />
 
-    <!-- Progress bar: 2dp line at very bottom -->
+    <LinearLayout
+        android:id="@+id/dotRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:orientation="horizontal"
+        android:gravity="center" />
+
     <View
         android:id="@+id/progressBar"
         android:layout_width="match_parent"
         android:layout_height="2dp"
+        android:layout_gravity="bottom"
         android:background="#3b82f6"
         android:scaleX="0"
-        android:transformPivotX="0" />
+        android:transformPivotX="0dp" />
 
-</LinearLayout>
+    <ProgressBar
+        android:id="@+id/loadingSpinner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone"
+        style="?android:attr/progressBarStyleLarge" />
+
+</FrameLayout>

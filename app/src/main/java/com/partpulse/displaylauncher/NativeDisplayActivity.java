@@ -51,7 +51,6 @@ public class NativeDisplayActivity extends Activity {
     private FrameLayout notifImagePanel;
     private TextView notifTag, notifTitle, notifBody, notifDate;
     private ImageView notifImage;
-    private LinearLayout hudOverlay;
     private TextView hudLabel, hudClock;
     private LinearLayout dotRow;
     private View progressBar;
@@ -105,7 +104,6 @@ public class NativeDisplayActivity extends Activity {
         notifBody           = findViewById(R.id.notifBody);
         notifDate           = findViewById(R.id.notifDate);
         notifImage          = findViewById(R.id.notifImage);
-        hudOverlay          = findViewById(R.id.hudOverlay);
         hudLabel            = findViewById(R.id.hudLabel);
         hudClock            = findViewById(R.id.hudClock);
         dotRow              = findViewById(R.id.dotRow);
@@ -284,14 +282,10 @@ public class NativeDisplayActivity extends Activity {
             Log.w(TAG, "PDF missing: " + s.localPath);
             return;
         }
-
         final DisplayMetrics realDm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
         final int screenW = realDm.widthPixels;
         final int screenH = realDm.heightPixels;
-        final float SCALE = 2.0f;
-        final int renderW = (int)(screenW * SCALE);
-        final int renderH = (int)(screenH * SCALE);
 
         renderExec.execute(() -> {
             ParcelFileDescriptor pfd = null;
@@ -305,19 +299,18 @@ public class NativeDisplayActivity extends Activity {
 
                 float pdfW = page.getWidth();
                 float pdfH = page.getHeight();
-                float scaleByW = renderW / pdfW;
-                float scaleByH = renderH / pdfH;
-                float fitScale = Math.min(scaleByW, scaleByH);
-                int bmpW = Math.max(1, (int)(pdfW * fitScale));
-                int bmpH = Math.max(1, (int)(pdfH * fitScale));
+                float targetW = screenW * 2.0f;
+                float targetH = screenH * 2.0f;
+                float scale = Math.min(targetW / pdfW, targetH / pdfH);
+                int bmpW = Math.max(1, (int)(pdfW * scale));
+                int bmpH = Math.max(1, (int)(pdfH * scale));
 
                 final Bitmap bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888);
                 bmp.eraseColor(0xFFFFFFFF);
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-
                 main.post(() -> pdfCanvas.setImageBitmap(bmp));
             } catch (Exception e) {
-                Log.e(TAG, "PDF render failed for " + s.localPath, e);
+                Log.e(TAG, "PDF render failed: " + e.getMessage());
             } finally {
                 if (page != null) try { page.close(); } catch (Exception ignored) {}
                 if (renderer != null) try { renderer.close(); } catch (Exception ignored) {}
