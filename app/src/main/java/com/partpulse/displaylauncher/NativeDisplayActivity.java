@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -283,8 +284,15 @@ public class NativeDisplayActivity extends Activity {
             Log.w(TAG, "PDF missing: " + s.localPath);
             return;
         }
-        final int targetW = Math.max(pdfCanvas.getWidth(),
-            getWindow().getDecorView().getWidth());
+
+        final DisplayMetrics realDm = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
+        final int screenW = realDm.widthPixels;
+        final int screenH = realDm.heightPixels;
+        final float SCALE = 2.0f;
+        final int renderW = (int)(screenW * SCALE);
+        final int renderH = (int)(screenH * SCALE);
+
         renderExec.execute(() -> {
             ParcelFileDescriptor pfd = null;
             PdfRenderer renderer = null;
@@ -294,12 +302,19 @@ public class NativeDisplayActivity extends Activity {
                 renderer = new PdfRenderer(pfd);
                 if (renderer.getPageCount() == 0) return;
                 page = renderer.openPage(0);
-                int w = targetW > 0 ? targetW : 1920;
-                int h = (int) (w * page.getHeight() / (float) page.getWidth());
-                if (h <= 0) h = 1080;
-                final Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+
+                float pdfW = page.getWidth();
+                float pdfH = page.getHeight();
+                float scaleByW = renderW / pdfW;
+                float scaleByH = renderH / pdfH;
+                float fitScale = Math.min(scaleByW, scaleByH);
+                int bmpW = Math.max(1, (int)(pdfW * fitScale));
+                int bmpH = Math.max(1, (int)(pdfH * fitScale));
+
+                final Bitmap bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888);
                 bmp.eraseColor(0xFFFFFFFF);
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+
                 main.post(() -> pdfCanvas.setImageBitmap(bmp));
             } catch (Exception e) {
                 Log.e(TAG, "PDF render failed for " + s.localPath, e);
