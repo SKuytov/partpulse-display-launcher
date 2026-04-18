@@ -17,7 +17,7 @@ public class AppPrefs {
     private static final String KEY_TOOLBAR      = "toolbar_visible";
 
     // Defaults
-    public static final String  DEFAULT_URL      = "http://192.168.0.62:5000/#/display";
+    public static final String  DEFAULT_URL      = "https://skuytov.eu/grafik/index.php";
     public static final int     DEFAULT_REFRESH  = 60;   // seconds
     public static final String  DEFAULT_PIN      = "1234";
     public static final boolean DEFAULT_PIN_EN   = true;

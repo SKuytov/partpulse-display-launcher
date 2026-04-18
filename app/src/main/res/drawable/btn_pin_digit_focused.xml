@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Active cursor state for the PIN numpad — bright with white ring -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#00B4D8" />
+    <stroke android:width="3dp" android:color="#FFFFFF" />
+    <size android:width="72dp" android:height="72dp" />
+</shape>

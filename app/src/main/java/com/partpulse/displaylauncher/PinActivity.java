@@ -9,10 +9,14 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 
 /**
- * Full-screen dark PIN entry screen.
- * Fully navigable with a TV remote D-pad:
- *   - Arrow keys move between numpad buttons
- *   - ENTER/DPAD_CENTER selects the focused button
+ * PIN entry screen — navigated entirely via dispatchKeyEvent.
+ * No View focus system is used. The "cursor" is tracked as (row, col)
+ * in a 4×3 logical grid:
+ *
+ *   [1][2][3]
+ *   [4][5][6]
+ *   [7][8][9]
+ *   [CLR][0][⌫]
  */
 public class PinActivity extends AppCompatActivity {
 
@@ -20,87 +24,149 @@ public class PinActivity extends AppCompatActivity {
     public static final String TARGET_SETTINGS = "settings";
 
     private static final int PIN_LENGTH = 4;
+    private static final int ROWS = 4;
+    private static final int COLS = 3;
+
+    // Grid content — matches layout IDs below
+    private static final String[][] LABELS = {
+        { "1", "2", "3" },
+        { "4", "5", "6" },
+        { "7", "8", "9" },
+        { "CLR", "0", "⌫" }
+    };
+
+    private TextView[][] buttons;
+    private View[]       dots;
+    private TextView     tvError;
+    private AppPrefs     prefs;
 
     private final StringBuilder input = new StringBuilder();
-    private AppPrefs prefs;
 
-    private View dot1, dot2, dot3, dot4;
-    private TextView tvError;
-
-    // Numpad button grid — row-major order (3 columns)
-    private TextView[][] grid;
+    // Current cursor position
+    private int curRow = 1; // start on row with 4-5-6
+    private int curCol = 1; // start on 5
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_pin);
 
-        prefs   = new AppPrefs(this);
-        dot1    = findViewById(R.id.dot1);
-        dot2    = findViewById(R.id.dot2);
-        dot3    = findViewById(R.id.dot3);
-        dot4    = findViewById(R.id.dot4);
+        prefs = new AppPrefs(this);
+
         tvError = findViewById(R.id.tvError);
+        dots = new View[]{ findViewById(R.id.dot1), findViewById(R.id.dot2),
+                           findViewById(R.id.dot3), findViewById(R.id.dot4) };
 
-        // Reference all buttons in grid order so we can wire D-pad traversal
-        grid = new TextView[][] {
-            { findViewById(R.id.btn1), findViewById(R.id.btn2), findViewById(R.id.btn3) },
-            { findViewById(R.id.btn4), findViewById(R.id.btn5), findViewById(R.id.btn6) },
-            { findViewById(R.id.btn7), findViewById(R.id.btn8), findViewById(R.id.btn9) },
-            { findViewById(R.id.btnClr), findViewById(R.id.btn0), findViewById(R.id.btnBack) },
-        };
+        // Map grid to view IDs
+        buttons = new TextView[ROWS][COLS];
+        buttons[0][0] = findViewById(R.id.btn1);
+        buttons[0][1] = findViewById(R.id.btn2);
+        buttons[0][2] = findViewById(R.id.btn3);
+        buttons[1][0] = findViewById(R.id.btn4);
+        buttons[1][1] = findViewById(R.id.btn5);
+        buttons[1][2] = findViewById(R.id.btn6);
+        buttons[2][0] = findViewById(R.id.btn7);
+        buttons[2][1] = findViewById(R.id.btn8);
+        buttons[2][2] = findViewById(R.id.btn9);
+        buttons[3][0] = findViewById(R.id.btnClr);
+        buttons[3][1] = findViewById(R.id.btn0);
+        buttons[3][2] = findViewById(R.id.btnBack);
 
-        // Wire click listeners
-        for (TextView[] row : grid) {
+        // Make all buttons non-focusable — we draw focus manually
+        for (TextView[] row : buttons) {
             for (TextView btn : row) {
-                btn.setOnClickListener(v -> handleButton(((TextView) v).getText().toString()));
-                // Also respond to DPAD_CENTER / ENTER key while focused
-                btn.setOnKeyListener((v, keyCode, event) -> {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN &&
-                            (keyCode == KeyEvent.KEYCODE_DPAD_CENTER
-                                    || keyCode == KeyEvent.KEYCODE_ENTER)) {
-                        handleButton(((TextView) v).getText().toString());
-                        return true;
-                    }
-                    return false;
+                btn.setFocusable(false);
+                btn.setFocusableInTouchMode(false);
+                // Touch still works
+                btn.setOnClickListener(v -> {
+                    String label = ((TextView) v).getText().toString();
+                    pressButton(label);
                 });
             }
         }
 
-        // Wire D-pad focus traversal manually for the grid
-        wireFocusTraversal();
-
         updateDots();
-
-        // Start focus on button "5" (centre of numpad — ergonomic default)
-        grid[1][1].requestFocus();
+        highlightCursor();
     }
 
-    // ── Button action ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  D-PAD intercepted at Activity level
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private void handleButton(String label) {
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true; // consume all
+
+        switch (event.getKeyCode()) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                moveCursor(-1, 0);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                moveCursor(1, 0);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                moveCursor(0, -1);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                moveCursor(0, 1);
+                return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_BUTTON_A:
+                pressButton(LABELS[curRow][curCol]);
+                return true;
+            case KeyEvent.KEYCODE_BACK:
+                // Block back — PIN must be entered
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cursor movement
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void moveCursor(int dr, int dc) {
+        clearCursor();
+        curRow = (curRow + dr + ROWS) % ROWS;
+        curCol = (curCol + dc + COLS) % COLS;
+        highlightCursor();
+    }
+
+    private void highlightCursor() {
+        TextView btn = buttons[curRow][curCol];
+        btn.setBackgroundResource(R.drawable.btn_pin_digit_focused);
+        btn.setTextColor(0xFFFFFFFF);
+    }
+
+    private void clearCursor() {
+        TextView btn = buttons[curRow][curCol];
+        // Restore original drawable based on whether it's an alt button
+        boolean isAlt = curRow == 3 && curCol != 1;
+        btn.setBackgroundResource(isAlt ? R.drawable.btn_pin_alt : R.drawable.btn_pin_digit);
+        btn.setTextColor(isAlt ? 0xFF00B4D8 : 0xFFEEEEFF);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Button action
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void pressButton(String label) {
+        tvError.setVisibility(View.INVISIBLE);
         switch (label) {
             case "CLR":
                 input.setLength(0);
-                updateDots();
-                tvError.setVisibility(View.INVISIBLE);
                 break;
             case "⌫":
-                if (input.length() > 0) {
-                    input.deleteCharAt(input.length() - 1);
-                    updateDots();
-                    tvError.setVisibility(View.INVISIBLE);
-                }
+                if (input.length() > 0) input.deleteCharAt(input.length() - 1);
                 break;
             default:
-                // Digit
-                if (input.length() < PIN_LENGTH) {
-                    input.append(label);
-                    updateDots();
-                    if (input.length() == PIN_LENGTH) verifyPin();
-                }
+                if (input.length() < PIN_LENGTH) input.append(label);
                 break;
         }
+        updateDots();
+        if (input.length() == PIN_LENGTH) verifyPin();
     }
 
     private void verifyPin() {
@@ -117,65 +183,17 @@ public class PinActivity extends AppCompatActivity {
         }
     }
 
-    // ── D-pad focus traversal wiring ─────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Dot indicators
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private void wireFocusTraversal() {
-        int rows = grid.length;
-        int cols = grid[0].length;
-
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                TextView btn = grid[r][c];
-
-                // UP
-                if (r > 0) {
-                    btn.setNextFocusUpId(grid[r - 1][c].getId());
-                } else {
-                    btn.setNextFocusUpId(btn.getId()); // stay on top row
-                }
-
-                // DOWN
-                if (r < rows - 1) {
-                    btn.setNextFocusDownId(grid[r + 1][c].getId());
-                } else {
-                    btn.setNextFocusDownId(btn.getId()); // stay on bottom row
-                }
-
-                // LEFT
-                if (c > 0) {
-                    btn.setNextFocusLeftId(grid[r][c - 1].getId());
-                } else {
-                    btn.setNextFocusLeftId(grid[r][cols - 1].getId()); // wrap to end of row
-                }
-
-                // RIGHT
-                if (c < cols - 1) {
-                    btn.setNextFocusRightId(grid[r][c + 1].getId());
-                } else {
-                    btn.setNextFocusRightId(grid[r][0].getId()); // wrap to start of row
-                }
-            }
+    private void updateDots() {
+        for (int i = 0; i < dots.length; i++) {
+            dots[i].setBackgroundResource(
+                i < input.length() ? R.drawable.dot_filled : R.drawable.dot_empty);
         }
     }
 
-    // ── Dot indicators ────────────────────────────────────────────────────────
-
-    private void updateDots() {
-        int len = input.length();
-        setDotFilled(dot1, len >= 1);
-        setDotFilled(dot2, len >= 2);
-        setDotFilled(dot3, len >= 3);
-        setDotFilled(dot4, len >= 4);
-    }
-
-    private void setDotFilled(View dot, boolean filled) {
-        dot.setBackgroundResource(filled ? R.drawable.dot_filled : R.drawable.dot_empty);
-    }
-
-    // ── Block back ────────────────────────────────────────────────────────────
-
     @Override
-    public void onBackPressed() {
-        // Block — user must enter the correct PIN
-    }
+    public void onBackPressed() { /* blocked */ }
 }

@@ -2,12 +2,12 @@ package com.partpulse.displaylauncher;
 
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.KeyEvent;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
@@ -17,9 +17,40 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+/**
+ * Settings screen — fully navigable with a TV remote.
+ *
+ * All D-pad key events are intercepted at the Activity level via
+ * dispatchKeyEvent(). A "cursor" integer tracks which row is active.
+ * No View focus system is used (all views are set non-focusable).
+ *
+ * Rows (cursor index):
+ *   0 — URL field
+ *   1 — Refresh spinner
+ *   2 — PIN enabled switch
+ *   3 — New PIN field          (only when PIN enabled)
+ *   4 — Confirm PIN field      (only when PIN enabled)
+ *   5 — Toolbar switch
+ *   6 — Save button
+ */
 public class SettingsActivity extends AppCompatActivity {
 
-    private AppPrefs prefs;
+    private static final String[] REFRESH_LABELS = { "Off", "30 s", "1 min", "2 min", "5 min", "10 min" };
+    private static final int[]    REFRESH_VALUES  = {    0,     30,      60,     120,     300,      600   };
+
+    // Fixed row indices
+    private static final int ROW_URL        = 0;
+    private static final int ROW_REFRESH    = 1;
+    private static final int ROW_PIN_SW     = 2;
+    private static final int ROW_PIN1       = 3;
+    private static final int ROW_PIN2       = 4;
+    private static final int ROW_TOOLBAR    = 5;
+    private static final int ROW_SAVE       = 6;
+    private static final int ROW_MAX        = 6;
+
+    private AppPrefs     prefs;
+    private int          cursor = 0;
+    private boolean      editingText = false; // true while keyboard is open on a field
 
     private EditText     etUrl;
     private Spinner      spRefresh;
@@ -30,8 +61,8 @@ public class SettingsActivity extends AppCompatActivity {
     private Switch       swToolbar;
     private Button       btnSave;
 
-    private static final String[] REFRESH_LABELS = { "Off", "30 s", "1 min", "2 min", "5 min", "10 min" };
-    private static final int[]    REFRESH_VALUES  = {    0,     30,      60,     120,     300,      600  };
+    // All "row" views in order — used for highlight rendering
+    private View[] rowViews;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,28 +71,13 @@ public class SettingsActivity extends AppCompatActivity {
 
         prefs = new AppPrefs(this);
 
-        androidx.appcompat.widget.Toolbar toolbar = findViewById(R.id.settingsToolbar);
-        setSupportActionBar(toolbar);
+        androidx.appcompat.widget.Toolbar tb = findViewById(R.id.settingsToolbar);
+        setSupportActionBar(tb);
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
             getSupportActionBar().setTitle("Settings");
         }
 
-        initViews();
-        initDisplaySection();
-        initSecuritySection();
-        initInterfaceSection();
-        wireDpadNavigation();
-
-        btnSave.setOnClickListener(v -> saveAndClose());
-
-        // Initial focus goes to the URL field
-        etUrl.requestFocus();
-    }
-
-    // ── View binding ─────────────────────────────────────────────────────────
-
-    private void initViews() {
         etUrl         = findViewById(R.id.etUrl);
         spRefresh     = findViewById(R.id.spRefresh);
         swPinEnabled  = findViewById(R.id.swPinEnabled);
@@ -71,123 +87,227 @@ public class SettingsActivity extends AppCompatActivity {
         tvPinMismatch = findViewById(R.id.tvPinMismatch);
         swToolbar     = findViewById(R.id.swToolbar);
         btnSave       = findViewById(R.id.btnSave);
-    }
 
-    // ── Display section ──────────────────────────────────────────────────────
+        rowViews = new View[]{ etUrl, spRefresh, swPinEnabled, etPin1, etPin2, swToolbar, btnSave };
 
-    private void initDisplaySection() {
+        // ── Disable View focus system on everything ──────────────────────────
+        for (View v : rowViews) {
+            v.setFocusable(false);
+            v.setFocusableInTouchMode(false);
+        }
+
+        // ── Populate fields ──────────────────────────────────────────────────
         etUrl.setText(prefs.getUrl());
 
         ArrayAdapter<String> adapter = new ArrayAdapter<>(
             this, android.R.layout.simple_spinner_item, REFRESH_LABELS);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spRefresh.setAdapter(adapter);
-
         int cur = prefs.getRefreshSeconds();
         for (int i = 0; i < REFRESH_VALUES.length; i++) {
             if (REFRESH_VALUES[i] == cur) { spRefresh.setSelection(i); break; }
         }
-    }
 
-    // ── Security section ─────────────────────────────────────────────────────
-
-    private void initSecuritySection() {
         swPinEnabled.setChecked(prefs.isPinEnabled());
         layoutNewPin.setVisibility(prefs.isPinEnabled() ? View.VISIBLE : View.GONE);
+        etPin1.setHint("New PIN (current: " + prefs.getPin() + ")");
 
-        swPinEnabled.setOnCheckedChangeListener((btn, checked) -> {
-            layoutNewPin.setVisibility(checked ? View.VISIBLE : View.GONE);
-            wireDpadNavigation(); // rebuild traversal when layout changes
-        });
+        swToolbar.setChecked(prefs.isToolbarVisible());
 
+        // PIN confirm mismatch watcher
         etPin2.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
-            public void onTextChanged(CharSequence s, int st, int b, int c) {}
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) {}
             public void afterTextChanged(Editable s) {
-                String p1 = etPin1.getText().toString();
-                String p2 = s.toString();
-                boolean mismatch = !p2.isEmpty() && p2.length() == 4 && !p1.equals(p2);
+                boolean mismatch = s.length() == 4
+                    && !s.toString().equals(etPin1.getText().toString());
                 tvPinMismatch.setVisibility(mismatch ? View.VISIBLE : View.GONE);
             }
         });
 
-        etPin1.setHint("New 4-digit PIN  (current: " + prefs.getPin() + ")");
+        // Touch listeners — still allow touch input
+        btnSave.setOnClickListener(v -> saveAndClose());
+        swPinEnabled.setOnClickListener(v -> {
+            swPinEnabled.toggle();
+            layoutNewPin.setVisibility(swPinEnabled.isChecked() ? View.VISIBLE : View.GONE);
+        });
+        swToolbar.setOnClickListener(v -> swToolbar.toggle());
+        spRefresh.setOnItemSelectedListener(null); // handled via D-pad below
+
+        highlightCursor();
     }
 
-    // ── Interface section ────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  D-PAD intercepted at Activity level
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private void initInterfaceSection() {
-        swToolbar.setChecked(prefs.isToolbarVisible());
-    }
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int kc = event.getKeyCode();
 
-    // ── D-pad traversal ──────────────────────────────────────────────────────
-
-    /**
-     * Builds the D-pad focus chain for the settings form.
-     * Called once on create and again if PIN section visibility changes.
-     */
-    private void wireDpadNavigation() {
-        boolean pinOn = swPinEnabled.isChecked();
-
-        // URL → Refresh spinner
-        etUrl.setNextFocusDownId(R.id.spRefresh);
-        etUrl.setImeActionLabel("Next", android.view.inputmethod.EditorInfo.IME_ACTION_NEXT);
-
-        // Spinner → PIN switch
-        spRefresh.setNextFocusDownId(R.id.swPinEnabled);
-        spRefresh.setNextFocusUpId(R.id.etUrl);
-
-        // PIN switch
-        swPinEnabled.setNextFocusUpId(R.id.spRefresh);
-
-        if (pinOn) {
-            // PIN switch → PIN1 field
-            swPinEnabled.setNextFocusDownId(R.id.etPin1);
-            etPin1.setNextFocusUpId(R.id.swPinEnabled);
-            etPin1.setNextFocusDownId(R.id.etPin2);
-            etPin2.setNextFocusUpId(R.id.etPin1);
-            etPin2.setNextFocusDownId(R.id.swToolbar);
-            swToolbar.setNextFocusUpId(R.id.etPin2);
-        } else {
-            // PIN switch → Toolbar switch
-            swPinEnabled.setNextFocusDownId(R.id.swToolbar);
-            swToolbar.setNextFocusUpId(R.id.swPinEnabled);
+        // While a text field keyboard is open, let normal text input flow through
+        if (editingText) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (kc == KeyEvent.KEYCODE_BACK || kc == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    // Close keyboard and return to D-pad nav
+                    closeKeyboard();
+                    return true;
+                }
+            }
+            return super.dispatchKeyEvent(event); // pass to EditText
         }
 
-        // Toolbar switch → Save button
-        swToolbar.setNextFocusDownId(R.id.btnSave);
-        btnSave.setNextFocusUpId(R.id.swToolbar);
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
 
-        // Allow ENTER/DPAD_CENTER to toggle switches
-        setDpadToggle(swPinEnabled);
-        setDpadToggle(swToolbar);
+        switch (kc) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                moveCursor(-1);
+                return true;
 
-        // Allow DPAD_CENTER / ENTER on Spinner to open dropdown
-        spRefresh.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN &&
-                    (keyCode == KeyEvent.KEYCODE_DPAD_CENTER
-                            || keyCode == KeyEvent.KEYCODE_ENTER)) {
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                moveCursor(1);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                handleLeftRight(-1);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                handleLeftRight(1);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_BUTTON_A:
+                activateCurrent();
+                return true;
+
+            case KeyEvent.KEYCODE_BACK:
+                finish();
+                return true;
+
+            default:
+                return true;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Cursor movement
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void moveCursor(int delta) {
+        clearHighlight(cursor);
+        int next = cursor + delta;
+
+        // Skip PIN fields if PIN is disabled
+        if (!swPinEnabled.isChecked()) {
+            if (next == ROW_PIN1 || next == ROW_PIN2) next += delta;
+        }
+
+        // Clamp
+        next = Math.max(0, Math.min(ROW_MAX, next));
+        cursor = next;
+        highlightCursor();
+    }
+
+    private void handleLeftRight(int delta) {
+        // LEFT/RIGHT on Refresh spinner changes the selected option
+        if (cursor == ROW_REFRESH) {
+            int pos = spRefresh.getSelectedItemPosition() + delta;
+            pos = Math.max(0, Math.min(REFRESH_LABELS.length - 1, pos));
+            spRefresh.setSelection(pos);
+        }
+        // LEFT/RIGHT on switches toggles them
+        if (cursor == ROW_PIN_SW) {
+            swPinEnabled.setChecked(!swPinEnabled.isChecked());
+            layoutNewPin.setVisibility(swPinEnabled.isChecked() ? View.VISIBLE : View.GONE);
+        }
+        if (cursor == ROW_TOOLBAR) {
+            swToolbar.setChecked(!swToolbar.isChecked());
+        }
+    }
+
+    private void activateCurrent() {
+        switch (cursor) {
+            case ROW_URL:
+            case ROW_PIN1:
+            case ROW_PIN2:
+                openKeyboard(rowViews[cursor]);
+                break;
+            case ROW_REFRESH:
                 spRefresh.performClick();
-                return true;
-            }
-            return false;
-        });
+                break;
+            case ROW_PIN_SW:
+                swPinEnabled.setChecked(!swPinEnabled.isChecked());
+                layoutNewPin.setVisibility(swPinEnabled.isChecked() ? View.VISIBLE : View.GONE);
+                break;
+            case ROW_TOOLBAR:
+                swToolbar.setChecked(!swToolbar.isChecked());
+                break;
+            case ROW_SAVE:
+                saveAndClose();
+                break;
+        }
     }
 
-    /** Makes a Switch respond to DPAD_CENTER / ENTER to toggle it. */
-    private void setDpadToggle(Switch sw) {
-        sw.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN &&
-                    (keyCode == KeyEvent.KEYCODE_DPAD_CENTER
-                            || keyCode == KeyEvent.KEYCODE_ENTER)) {
-                sw.toggle();
-                return true;
-            }
-            return false;
-        });
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Keyboard helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void openKeyboard(View v) {
+        v.setFocusable(true);
+        v.setFocusableInTouchMode(true);
+        v.requestFocus();
+        android.view.inputmethod.InputMethodManager imm =
+            (android.view.inputmethod.InputMethodManager)
+                getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        editingText = true;
     }
 
-    // ── Save ─────────────────────────────────────────────────────────────────
+    private void closeKeyboard() {
+        View focused = getCurrentFocus();
+        if (focused != null) {
+            android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager)
+                    getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
+            focused.setFocusable(false);
+            focused.setFocusableInTouchMode(false);
+            focused.clearFocus();
+        }
+        editingText = false;
+        highlightCursor();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Highlight rendering
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void highlightCursor() {
+        View v = rowViews[cursor];
+        v.setAlpha(1.0f);
+        // Draw a cyan left border by changing background on the wrapper row
+        // (simpler: just change alpha of siblings and set elevation on active)
+        v.setElevation(6f);
+        v.setScaleX(1.02f);
+        v.setScaleY(1.02f);
+        // Tint the view background
+        v.setBackgroundResource(R.drawable.row_focused);
+    }
+
+    private void clearHighlight(int idx) {
+        View v = rowViews[idx];
+        v.setAlpha(1.0f);
+        v.setElevation(0f);
+        v.setScaleX(1.0f);
+        v.setScaleY(1.0f);
+        v.setBackground(null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Save
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void saveAndClose() {
         String url = etUrl.getText().toString().trim();
@@ -205,7 +325,7 @@ public class SettingsActivity extends AppCompatActivity {
             String p1 = etPin1.getText().toString();
             String p2 = etPin2.getText().toString();
             if (!p1.isEmpty()) {
-                if (p1.length() != 4 || !p1.matches("\\d{4}")) {
+                if (!p1.matches("\\d{4}")) {
                     Toast.makeText(this, "PIN must be exactly 4 digits", Toast.LENGTH_SHORT).show();
                     return;
                 }
@@ -224,7 +344,7 @@ public class SettingsActivity extends AppCompatActivity {
 
     @Override
     public boolean onSupportNavigateUp() {
-        onBackPressed();
+        finish();
         return true;
     }
 }

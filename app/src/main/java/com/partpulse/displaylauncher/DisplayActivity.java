@@ -16,7 +16,34 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+/**
+ * Full-screen kiosk WebView for Android TV.
+ *
+ * KEY DESIGN DECISION — why we override dispatchKeyEvent instead of using
+ * setOnKeyListener / nextFocusXxx:
+ *
+ *   Android TV remotes fire DPAD key events that flow through the Activity's
+ *   dispatchKeyEvent() BEFORE they reach any View's focus system.
+ *   WebView aggressively consumes key events internally (it tries to move its
+ *   own internal focus/accessibility cursor), so by the time we set an
+ *   OnKeyListener on the WebView, it's too late — the event is already eaten.
+ *
+ *   Solution: intercept at the Activity level, decide ourselves whether the
+ *   key should scroll the WebView (via JS injection), show/hide the toolbar,
+ *   or press a toolbar button — then return true to consume the event so
+ *   nothing else touches it.
+ */
 public class DisplayActivity extends AppCompatActivity {
+
+    // ── Scroll amount per D-pad press (px) ───────────────────────────────────
+    private static final int SCROLL_STEP = 300;
+
+    // ── Toolbar auto-hide delay ───────────────────────────────────────────────
+    private static final long HIDE_DELAY_MS = 5_000;
+
+    // ── Toolbar focus: 0 = Refresh, 1 = Settings ─────────────────────────────
+    private int toolbarFocus = 0;
+    private boolean toolbarVisible = false;
 
     private WebView      webView;
     private View         toolbar;
@@ -27,12 +54,7 @@ public class DisplayActivity extends AppCompatActivity {
     private AppPrefs     prefs;
     private Handler      refreshHandler;
     private Runnable     refreshRunnable;
-
     private Handler      hideHandler;
-    private static final long HIDE_DELAY_MS = 5_000;
-
-    // Track whether toolbar is currently shown so D-pad Up from WebView shows it
-    private boolean toolbarShowing = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -50,7 +72,7 @@ public class DisplayActivity extends AppCompatActivity {
         btnRefresh  = findViewById(R.id.btnRefresh);
         btnSettings = findViewById(R.id.btnSettings);
 
-        // ── WebView settings ────────────────────────────────────────────────
+        // ── WebView config ───────────────────────────────────────────────────
         WebSettings ws = webView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
@@ -58,97 +80,231 @@ public class DisplayActivity extends AppCompatActivity {
         ws.setUseWideViewPort(true);
         ws.setCacheMode(WebSettings.LOAD_DEFAULT);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // Disable WebView's own internal accessibility cursor — we handle navigation
+        webView.setFocusable(false);
+        webView.setFocusableInTouchMode(false);
 
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                view.evaluateJavascript(
-                    "document.documentElement.style.overflow='hidden';", null);
-            }
-        });
+        webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
 
-        // ── D-pad inside WebView ─────────────────────────────────────────────
-        // WebView handles LEFT/RIGHT/DOWN naturally for scrolling web content.
-        // UP from WebView edge shows the toolbar; ENTER activates focused link.
-        webView.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-
-            switch (keyCode) {
-                case KeyEvent.KEYCODE_DPAD_UP:
-                    // If the page can't scroll up further, show toolbar instead
-                    if (!webView.canScrollVertically(-1)) {
-                        showToolbar();
-                        scheduleAutoHide();
-                        btnRefresh.requestFocus();
-                        return true;
-                    }
-                    return false; // let WebView scroll
-
-                case KeyEvent.KEYCODE_BACK:
-                    if (webView.canGoBack()) {
-                        webView.goBack();
-                        return true;
-                    }
-                    return true; // block exit
-
-                default:
-                    return false;
-            }
+        // ── Touch on WebView shows toolbar ───────────────────────────────────
+        webView.setOnTouchListener((v, ev) -> {
+            showToolbar();
+            return false;
         });
 
-        // ── Toolbar buttons ──────────────────────────────────────────────────
+        // ── Toolbar button click listeners ───────────────────────────────────
         btnRefresh.setOnClickListener(v -> {
             webView.reload();
             scheduleAutoHide();
         });
 
-        btnSettings.setOnClickListener(v -> {
-            stopRefreshTimer();
-            if (prefs.isPinEnabled()) {
-                Intent intent = new Intent(this, PinActivity.class);
-                intent.putExtra(PinActivity.EXTRA_TARGET, PinActivity.TARGET_SETTINGS);
-                startActivity(intent);
-            } else {
-                startActivity(new Intent(this, SettingsActivity.class));
-            }
-        });
+        btnSettings.setOnClickListener(v -> openSettings());
 
-        // When focus leaves the last toolbar button downward → return focus to WebView
-        btnSettings.setOnFocusChangeListener((v, hasFocus) -> {
-            // nothing needed — handled by nextFocusDown in XML
-        });
+        // Toolbar is NOT focusable via the View focus system —
+        // we manage its "cursor" manually via toolbarFocus int
+        btnRefresh.setFocusable(false);
+        btnSettings.setFocusable(false);
+    }
 
-        // D-pad DOWN from toolbar → back to WebView
-        btnRefresh.setNextFocusDownId(R.id.webView);
-        btnSettings.setNextFocusDownId(R.id.webView);
+    // ─────────────────────────────────────────────────────────────────────────
+    //  D-PAD KEY HANDLING  (intercepted before any View sees the event)
+    // ─────────────────────────────────────────────────────────────────────────
 
-        // D-pad RIGHT from Refresh → Settings
-        btnRefresh.setNextFocusRightId(R.id.btnSettings);
-        // D-pad LEFT from Settings → Refresh
-        btnSettings.setNextFocusLeftId(R.id.btnRefresh);
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_DOWN) {
+            // consume UP events for keys we already handled on DOWN, ignore the rest
+            return super.dispatchKeyEvent(event);
+        }
 
-        // ── Touch shows toolbar ──────────────────────────────────────────────
-        webView.setOnTouchListener((v, ev) -> {
+        int kc = event.getKeyCode();
+
+        // ── MENU key or SELECT while toolbar hidden → show toolbar ────────────
+        if (kc == KeyEvent.KEYCODE_MENU) {
             showToolbar();
-            scheduleAutoHide();
-            return false;
-        });
+            return true;
+        }
+
+        if (toolbarVisible) {
+            return handleKeyWithToolbar(kc);
+        } else {
+            return handleKeyInWebView(kc);
+        }
+    }
+
+    /** Handle key presses when toolbar is visible (toolbar is in "focus"). */
+    private boolean handleKeyWithToolbar(int kc) {
+        switch (kc) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                toolbarFocus = 0;
+                highlightToolbar();
+                scheduleAutoHide();
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                toolbarFocus = 1;
+                highlightToolbar();
+                scheduleAutoHide();
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                // Move from toolbar back into WebView
+                hideToolbar();
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_UP:
+                // Already at top — just keep toolbar visible
+                scheduleAutoHide();
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_BUTTON_A:
+                // Press whichever toolbar button is focused
+                if (toolbarFocus == 0) {
+                    webView.reload();
+                    scheduleAutoHide();
+                } else {
+                    openSettings();
+                }
+                return true;
+
+            case KeyEvent.KEYCODE_BACK:
+                // Back hides toolbar first
+                hideToolbar();
+                return true;
+
+            default:
+                return true; // consume all keys while toolbar is open
+        }
+    }
+
+    /** Handle key presses when toolbar is hidden (WebView is active). */
+    private boolean handleKeyInWebView(int kc) {
+        switch (kc) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                jsScroll(0, -SCROLL_STEP);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                jsScroll(0, SCROLL_STEP);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                jsScroll(-SCROLL_STEP, 0);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                jsScroll(SCROLL_STEP, 0);
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_BUTTON_A:
+                // Click whatever element is under the JS cursor / simulate tap centre
+                jsClick();
+                return true;
+
+            case KeyEvent.KEYCODE_BACK:
+                if (webView.canGoBack()) {
+                    webView.goBack();
+                } // else: block exit from kiosk
+                return true;
+
+            case KeyEvent.KEYCODE_MENU:
+                showToolbar();
+                return true;
+
+            default:
+                return super.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, kc));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  JavaScript helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void jsScroll(int dx, int dy) {
+        webView.evaluateJavascript(
+            "window.scrollBy(" + dx + "," + dy + ");", null);
+    }
+
+    private void jsClick() {
+        // Simulate a click on the currently focused / active element
+        webView.evaluateJavascript(
+            "(function(){ var el = document.activeElement; " +
+            "if(el && el !== document.body){ el.click(); } })()", null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Toolbar helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void showToolbar() {
+        toolbarVisible = true;
+        toolbar.setVisibility(View.VISIBLE);
+        toolbarFocus = 0; // default focus on Refresh
+        highlightToolbar();
+        scheduleAutoHide();
+    }
+
+    private void hideToolbar() {
+        toolbarVisible = false;
+        toolbar.setVisibility(View.GONE);
+        clearToolbarHighlight();
+        hideHandler.removeCallbacksAndMessages(null);
+    }
+
+    private void highlightToolbar() {
+        // Show which button is "focused" by changing alpha
+        btnRefresh.setAlpha(toolbarFocus == 0 ? 1.0f : 0.5f);
+        btnSettings.setAlpha(toolbarFocus == 1 ? 1.0f : 0.5f);
+
+        // Also draw a highlight ring by changing background tint
+        btnRefresh.setBackgroundResource(
+            toolbarFocus == 0 ? R.drawable.btn_toolbar_focused : R.drawable.btn_toolbar_selector);
+        btnSettings.setBackgroundResource(
+            toolbarFocus == 1 ? R.drawable.btn_toolbar_focused : R.drawable.btn_toolbar_selector);
+    }
+
+    private void clearToolbarHighlight() {
+        btnRefresh.setAlpha(1.0f);
+        btnSettings.setAlpha(1.0f);
+        btnRefresh.setBackgroundResource(R.drawable.btn_toolbar_selector);
+        btnSettings.setBackgroundResource(R.drawable.btn_toolbar_selector);
+    }
+
+    private void scheduleAutoHide() {
+        hideHandler.removeCallbacksAndMessages(null);
+        hideHandler.postDelayed(this::hideToolbar, HIDE_DELAY_MS);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Settings / lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void openSettings() {
+        stopRefreshTimer();
+        hideToolbar();
+        if (prefs.isPinEnabled()) {
+            Intent i = new Intent(this, PinActivity.class);
+            i.putExtra(PinActivity.EXTRA_TARGET, PinActivity.TARGET_SETTINGS);
+            startActivity(i);
+        } else {
+            startActivity(new Intent(this, SettingsActivity.class));
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        loadUrl();
-        applyToolbarVisibility();
+        String url = prefs.getUrl();
+        tvUrl.setText(url);
+        webView.loadUrl(url);
+        toolbar.setVisibility(View.GONE);
+        toolbarVisible = false;
         startRefreshTimer();
-        if (prefs.isToolbarVisible()) {
-            showToolbar();
-            scheduleAutoHide();
-        }
-        // Give focus to WebView on resume so remote works immediately
-        webView.requestFocus();
     }
 
     @Override
@@ -159,64 +315,21 @@ public class DisplayActivity extends AppCompatActivity {
     }
 
     @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        // MENU key (some remotes) or ENTER while WebView not focused → show toolbar
-        if (keyCode == KeyEvent.KEYCODE_MENU) {
-            showToolbar();
-            scheduleAutoHide();
-            btnRefresh.requestFocus();
-            return true;
-        }
-        return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
     public void onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack();
-        }
-        // do NOT call super — prevents exiting kiosk
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private void loadUrl() {
-        String url = prefs.getUrl();
-        tvUrl.setText(url);
-        webView.loadUrl(url);
-    }
-
-    private void applyToolbarVisibility() {
-        toolbar.setVisibility(prefs.isToolbarVisible() ? View.VISIBLE : View.GONE);
-    }
-
-    private void showToolbar() {
-        toolbarShowing = true;
-        toolbar.setVisibility(View.VISIBLE);
-    }
-
-    private void scheduleAutoHide() {
-        hideHandler.removeCallbacksAndMessages(null);
-        hideHandler.postDelayed(() -> {
-            toolbarShowing = false;
-            toolbar.setVisibility(View.GONE);
-            // Return focus to WebView when toolbar hides
-            webView.requestFocus();
-        }, HIDE_DELAY_MS);
+        // Handled in dispatchKeyEvent — do nothing here
     }
 
     private void startRefreshTimer() {
         stopRefreshTimer();
-        int seconds = prefs.getRefreshSeconds();
-        if (seconds <= 0) return;
+        int sec = prefs.getRefreshSeconds();
+        if (sec <= 0) return;
         refreshRunnable = new Runnable() {
-            @Override
-            public void run() {
+            @Override public void run() {
                 webView.reload();
-                refreshHandler.postDelayed(this, seconds * 1000L);
+                refreshHandler.postDelayed(this, sec * 1000L);
             }
         };
-        refreshHandler.postDelayed(refreshRunnable, seconds * 1000L);
+        refreshHandler.postDelayed(refreshRunnable, sec * 1000L);
     }
 
     private void stopRefreshTimer() {
