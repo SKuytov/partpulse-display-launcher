@@ -4,12 +4,11 @@
     android:layout_height="match_parent"
     android:background="#111111">
 
-    <ImageView
+    <com.partpulse.displaylauncher.PdfPageView
         android:id="@+id/pdfCanvas"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:scaleType="centerInside"
-        android:contentDescription="@null" />
+        android:background="#111111" />
 
     <LinearLayout
         android:id="@+id/notificationOverlay"

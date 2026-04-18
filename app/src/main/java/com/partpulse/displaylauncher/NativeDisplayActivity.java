@@ -45,7 +45,7 @@ public class NativeDisplayActivity extends Activity {
     public static final String ACTION_SLIDES_UPDATED =
         "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
-    private ImageView pdfCanvas;
+    private PdfPageView pdfCanvas;
     private LinearLayout notificationOverlay;
     private LinearLayout notifTextPanel;
     private FrameLayout notifImagePanel;
@@ -96,7 +96,6 @@ public class NativeDisplayActivity extends Activity {
         setContentView(R.layout.activity_native_display);
 
         pdfCanvas           = findViewById(R.id.pdfCanvas);
-        pdfCanvas.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         notificationOverlay = findViewById(R.id.notificationOverlay);
         notifTextPanel      = findViewById(R.id.notifTextPanel);
         notifImagePanel     = findViewById(R.id.notifImagePanel);
@@ -192,6 +191,7 @@ public class NativeDisplayActivity extends Activity {
         updateDots(index);
 
         if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
+            pdfCanvas.clearBitmap();
             pdfCanvas.setVisibility(View.GONE);
             notificationOverlay.setVisibility(View.VISIBLE);
 
@@ -312,10 +312,8 @@ public class NativeDisplayActivity extends Activity {
                 page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
 
                 main.post(() -> {
-                    pdfCanvas.setImageBitmap(bmp);
-                    if (pdfCanvas.getDrawable() != null) {
-                        pdfCanvas.getDrawable().setFilterBitmap(false);
-                    }
+                    pdfCanvas.setVisibility(View.VISIBLE);
+                    pdfCanvas.setBitmap(bmp);
                 });
             } catch (Exception e) {
                 Log.e(TAG, "PDF render failed: " + e.getMessage());
