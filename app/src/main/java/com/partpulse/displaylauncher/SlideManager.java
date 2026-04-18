@@ -84,13 +84,14 @@ public class SlideManager {
                     Slide s = new Slide();
                     s.type = o.optString("type", Slide.TYPE_PDF);
                     s.label = o.optString("label", "");
-                    String rawUrl = o.optString("url", "");
+                    String rawUrl = o.optString("src", o.optString("url", ""));
                     if (rawUrl != null && !rawUrl.isEmpty()) {
                         s.url = absolute(base, rawUrl);
                     }
                     s.title = o.optString("title", "");
                     s.body = o.optString("body", "");
                     s.date = o.optString("date", "");
+                    s.duration = o.optInt("duration", 10);
                     parsed.add(s);
                 }
 

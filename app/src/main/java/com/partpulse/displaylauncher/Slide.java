@@ -15,4 +15,5 @@ public class Slide {
     public String body;
     public String date;
     public String localPath;
+    public int duration = 10; // seconds to display this slide
 }

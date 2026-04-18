@@ -282,8 +282,12 @@ public class NativeDisplayActivity extends Activity {
 
     private void scheduleAdvance() {
         main.removeCallbacks(advanceRunnable);
-        int secs = prefs.getRefreshSeconds();
-        if (secs <= 0) secs = 60;
+        int secs = 0;
+        if (!slides.isEmpty() && currentIndex >= 0 && currentIndex < slides.size()) {
+            secs = slides.get(currentIndex).duration;
+        }
+        if (secs <= 0) secs = prefs.getRefreshSeconds();
+        if (secs <= 0) secs = 10;
         main.postDelayed(advanceRunnable, secs * 1000L);
     }
 
