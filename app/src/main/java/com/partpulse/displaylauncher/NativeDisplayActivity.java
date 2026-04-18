@@ -8,7 +8,6 @@ import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.pdf.PdfRenderer;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -25,6 +24,9 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+
+import com.shockwave.pdfium.PdfiumCore;
+import com.shockwave.pdfium.PdfDocument;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -288,39 +290,39 @@ public class NativeDisplayActivity extends Activity {
         getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
         final int screenW = realDm.widthPixels;
         final int screenH = realDm.heightPixels;
+        final Context appContext = getApplicationContext();
 
         renderExec.execute(() -> {
-            ParcelFileDescriptor pfd = null;
-            PdfRenderer renderer = null;
-            PdfRenderer.Page page = null;
+            PdfiumCore pdfiumCore = null;
+            PdfDocument pdfDocument = null;
             try {
-                pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
-                renderer = new PdfRenderer(pfd);
-                if (renderer.getPageCount() == 0) return;
-                page = renderer.openPage(0);
+                pdfiumCore = new PdfiumCore(appContext);
+                ParcelFileDescriptor pfd = ParcelFileDescriptor.open(
+                    pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
+                pdfDocument = pdfiumCore.newDocument(pfd);
+                pdfiumCore.openPage(pdfDocument, 0);
 
-                float pdfW = page.getWidth();
-                float pdfH = page.getHeight();
+                int pdfW = pdfiumCore.getPageWidthPoint(pdfDocument, 0);
+                int pdfH = pdfiumCore.getPageHeightPoint(pdfDocument, 0);
 
-                float scale = Math.min(screenW / pdfW, screenH / pdfH);
+                float scale = Math.min((float) screenW / pdfW, (float) screenH / pdfH);
                 int bmpW = Math.max(1, Math.round(pdfW * scale));
                 int bmpH = Math.max(1, Math.round(pdfH * scale));
 
                 final Bitmap bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888);
-                bmp.eraseColor(0xFFFFFFFF);
-
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                pdfiumCore.renderPageBitmap(pdfDocument, bmp, 0, 0, 0, bmpW, bmpH, true);
 
                 main.post(() -> {
                     pdfCanvas.setVisibility(View.VISIBLE);
                     pdfCanvas.setBitmap(bmp);
                 });
             } catch (Exception e) {
-                Log.e(TAG, "PDF render failed: " + e.getMessage());
+                Log.e(TAG, "Pdfium render failed: " + e.getMessage());
             } finally {
-                if (page != null) try { page.close(); } catch (Exception ignored) {}
-                if (renderer != null) try { renderer.close(); } catch (Exception ignored) {}
-                if (pfd != null) try { pfd.close(); } catch (Exception ignored) {}
+                try {
+                    if (pdfDocument != null && pdfiumCore != null)
+                        pdfiumCore.closeDocument(pdfDocument);
+                } catch (Exception ignored) {}
             }
         });
     }
