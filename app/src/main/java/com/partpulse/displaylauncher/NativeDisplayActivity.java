@@ -17,8 +17,9 @@ import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
-import android.view.ViewGroup;
+import android.view.animation.LinearInterpolator;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -45,11 +46,14 @@ public class NativeDisplayActivity extends Activity {
 
     private ImageView pdfCanvas;
     private LinearLayout notificationOverlay;
-    private TextView notifTitle, notifBody, notifDate;
+    private LinearLayout notifTextPanel;
+    private FrameLayout notifImagePanel;
+    private TextView notifTag, notifTitle, notifBody, notifDate;
     private ImageView notifImage;
     private LinearLayout hudOverlay;
     private TextView hudLabel, hudClock;
     private LinearLayout dotRow;
+    private View progressBar;
     private ProgressBar loadingSpinner;
 
     private SlideManager slideManager;
@@ -73,7 +77,7 @@ public class NativeDisplayActivity extends Activity {
     private final Runnable clockRunnable = new Runnable() {
         @Override public void run() {
             updateClock();
-            main.postDelayed(this, 60_000L);
+            main.postDelayed(this, 1_000L);
         }
     };
 
@@ -93,6 +97,9 @@ public class NativeDisplayActivity extends Activity {
 
         pdfCanvas           = findViewById(R.id.pdfCanvas);
         notificationOverlay = findViewById(R.id.notificationOverlay);
+        notifTextPanel      = findViewById(R.id.notifTextPanel);
+        notifImagePanel     = findViewById(R.id.notifImagePanel);
+        notifTag            = findViewById(R.id.notifTag);
         notifTitle          = findViewById(R.id.notifTitle);
         notifBody           = findViewById(R.id.notifBody);
         notifDate           = findViewById(R.id.notifDate);
@@ -101,6 +108,7 @@ public class NativeDisplayActivity extends Activity {
         hudLabel            = findViewById(R.id.hudLabel);
         hudClock            = findViewById(R.id.hudClock);
         dotRow              = findViewById(R.id.dotRow);
+        progressBar         = findViewById(R.id.progressBar);
         loadingSpinner      = findViewById(R.id.loadingSpinner);
 
         prefs = new AppPrefs(this);
@@ -179,35 +187,93 @@ public class NativeDisplayActivity extends Activity {
     private void showSlide(int index) {
         if (index < 0 || index >= slides.size()) return;
         final Slide s = slides.get(index);
-        hudLabel.setText(s.label == null ? "" : s.label);
+
+        applyLabelChip(s);
         updateDots(index);
 
         if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
             pdfCanvas.setVisibility(View.GONE);
             notificationOverlay.setVisibility(View.VISIBLE);
+
+            String tagText = (s.label == null || s.label.isEmpty()) ? "Съобщение" : s.label;
+            notifTag.setText("● " + tagText);
             notifTitle.setText(s.title == null ? "" : s.title);
             notifBody.setText(s.body == null ? "" : s.body);
             notifDate.setText(s.date == null ? "" : s.date);
-            if (s.localPath != null && new File(s.localPath).exists()) {
+
+            boolean hasImage = s.localPath != null && new File(s.localPath).exists();
+            if (hasImage) {
+                notifImagePanel.setVisibility(View.VISIBLE);
+                final String path = s.localPath;
                 renderExec.execute(() -> {
-                    Bitmap bmp = BitmapFactory.decodeFile(s.localPath);
+                    Bitmap bmp = BitmapFactory.decodeFile(path);
                     main.post(() -> {
                         if (bmp != null) {
                             notifImage.setImageBitmap(bmp);
-                            notifImage.setVisibility(View.VISIBLE);
+                            notifImagePanel.setVisibility(View.VISIBLE);
                         } else {
-                            notifImage.setVisibility(View.GONE);
+                            notifImagePanel.setVisibility(View.GONE);
                         }
                     });
                 });
             } else {
-                notifImage.setVisibility(View.GONE);
+                notifImagePanel.setVisibility(View.GONE);
             }
         } else {
             notificationOverlay.setVisibility(View.GONE);
             pdfCanvas.setVisibility(View.VISIBLE);
             renderPdf(s);
         }
+
+        animateProgress(Math.max(1, s.duration) * 1000);
+    }
+
+    private void applyLabelChip(Slide s) {
+        GradientDrawable chipBg = new GradientDrawable();
+        chipBg.setCornerRadius(dp(20));
+        chipBg.setColor(labelBgColor(s.lblClass));
+        hudLabel.setBackground(chipBg);
+        hudLabel.setTextColor(labelTextColor(s.lblClass));
+        String text = s.label == null ? "" : s.label;
+        hudLabel.setText(text.toUpperCase(Locale.getDefault()));
+    }
+
+    private int labelBgColor(String lblClass) {
+        switch (lblClass == null ? "" : lblClass) {
+            case "lbl-blue":   return 0x5A3B82F6;
+            case "lbl-amber":  return 0x5AF59E0B;
+            case "lbl-green":  return 0x4D22C55E;
+            case "lbl-purple": return 0x4DA855F7;
+            case "lbl-red":    return 0x4DEF4444;
+            case "lbl-teal":   return 0x4D14B8A6;
+            case "lbl-notif":  return 0x4022C55E;
+            default:           return 0x663B82F6;
+        }
+    }
+
+    private int labelTextColor(String lblClass) {
+        switch (lblClass == null ? "" : lblClass) {
+            case "lbl-blue":   return 0xFFBFDBFE;
+            case "lbl-amber":  return 0xFFFDE68A;
+            case "lbl-green":  return 0xFFBBF7D0;
+            case "lbl-purple": return 0xFFE9D5FF;
+            case "lbl-red":    return 0xFFFECACA;
+            case "lbl-teal":   return 0xFF99F6E4;
+            case "lbl-notif":  return 0xFF86EFAC;
+            default:           return 0xFFFFFFFF;
+        }
+    }
+
+    private void animateProgress(int durationMs) {
+        if (progressBar == null) return;
+        progressBar.animate().cancel();
+        progressBar.setScaleX(0f);
+        progressBar.setPivotX(0f);
+        progressBar.animate()
+            .scaleX(1f)
+            .setDuration(durationMs)
+            .setInterpolator(new LinearInterpolator())
+            .start();
     }
 
     private void renderPdf(final Slide s) {
@@ -308,7 +374,7 @@ public class NativeDisplayActivity extends Activity {
     // ─── clock ──────────────────────────────────────────────────────────────
 
     private void updateClock() {
-        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
         hudClock.setText(fmt.format(new Date()));
     }
 
@@ -326,11 +392,8 @@ public class NativeDisplayActivity extends Activity {
                     return true;
                 case KeyEvent.KEYCODE_DPAD_UP:
                 case KeyEvent.KEYCODE_DPAD_DOWN:
-                    toggleHud();
-                    return true;
                 case KeyEvent.KEYCODE_DPAD_CENTER:
                 case KeyEvent.KEYCODE_ENTER:
-                    toggleHud();
                     return true;
                 case KeyEvent.KEYCODE_MENU:
                 case KeyEvent.KEYCODE_SETTINGS:
@@ -340,14 +403,6 @@ public class NativeDisplayActivity extends Activity {
             }
         }
         return super.dispatchKeyEvent(event);
-    }
-
-    private void toggleHud() {
-        boolean show = hudOverlay.getVisibility() != View.VISIBLE;
-        hudOverlay.setVisibility(show ? View.VISIBLE : View.GONE);
-        if (show) {
-            main.postDelayed(() -> hudOverlay.setVisibility(View.GONE), 4000L);
-        }
     }
 
     private void openSettings() {

@@ -82,10 +82,12 @@ public class SlideManager {
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.getJSONObject(i);
                     Slide s = new Slide();
+                    s.id = o.optInt("id", i);
                     s.type = o.optString("type", Slide.TYPE_PDF);
                     s.label = o.optString("label", "");
+                    s.lblClass = o.optString("lblClass", "");
                     String rawUrl = o.optString("src", o.optString("url", ""));
-                    if (rawUrl != null && !rawUrl.isEmpty()) {
+                    if (rawUrl != null && !rawUrl.isEmpty() && !"null".equals(rawUrl)) {
                         s.url = absolute(base, rawUrl);
                     }
                     s.title = o.optString("title", "");
@@ -93,6 +95,16 @@ public class SlideManager {
                     s.date = o.optString("date", "");
                     s.duration = o.optInt("duration", 10);
                     parsed.add(s);
+                }
+
+                // For notification slides, content is embedded in HTML divs, not JSON.
+                for (Slide s : parsed) {
+                    if (!Slide.TYPE_NOTIFICATION.equals(s.type)) continue;
+                    try {
+                        enrichNotificationFromHtml(s, html, base);
+                    } catch (Exception e) {
+                        Log.w(TAG, "Failed to parse notification HTML for slide " + s.id + ": " + e.getMessage());
+                    }
                 }
 
                 File cacheDir = context.getCacheDir();
@@ -129,6 +141,49 @@ public class SlideManager {
     }
 
     // ─── helpers ────────────────────────────────────────────────────────────
+
+    private static final Pattern NOTIF_TITLE =
+        Pattern.compile("<h2[^>]*class=\"notif-title\"[^>]*>(.*?)</h2>", Pattern.DOTALL);
+    private static final Pattern NOTIF_BODY =
+        Pattern.compile("<p[^>]*class=\"notif-body\"[^>]*>(.*?)</p>", Pattern.DOTALL);
+    private static final Pattern NOTIF_DATE =
+        Pattern.compile("<div[^>]*class=\"notif-date\"[^>]*>(.*?)</div>", Pattern.DOTALL);
+    private static final Pattern NOTIF_IMG =
+        Pattern.compile("<img[^>]+src=\"([^\"]+)\"", Pattern.DOTALL);
+
+    private void enrichNotificationFromHtml(Slide s, String html, String base) {
+        Pattern slidePat = Pattern.compile(
+            "<div[^>]+id=\"slide-" + s.id + "\"[^>]*>(.*?)</div>\\s*</div>\\s*</div>",
+            Pattern.DOTALL);
+        Matcher m = slidePat.matcher(html);
+        if (!m.find()) return;
+        String block = m.group(1);
+
+        Matcher t = NOTIF_TITLE.matcher(block);
+        if (t.find()) s.title = stripHtml(t.group(1));
+        Matcher b = NOTIF_BODY.matcher(block);
+        if (b.find()) s.body = stripHtml(b.group(1));
+        Matcher d = NOTIF_DATE.matcher(block);
+        if (d.find()) s.date = stripHtml(d.group(1));
+        Matcher i = NOTIF_IMG.matcher(block);
+        if (i.find()) {
+            String src = i.group(1);
+            if (src != null && !src.isEmpty()) {
+                s.url = absolute(base, src);
+            }
+        }
+    }
+
+    private String stripHtml(String html) {
+        if (html == null) return "";
+        return html.replaceAll("<[^>]+>", "")
+                   .replace("&amp;", "&")
+                   .replace("&lt;", "<")
+                   .replace("&gt;", ">")
+                   .replace("&#9679;", "●")
+                   .replace("&nbsp;", " ")
+                   .trim();
+    }
 
     private String fetchString(String url) throws Exception {
         Request req = new Request.Builder().url(url).build();

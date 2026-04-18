@@ -8,8 +8,10 @@ public class Slide {
     public static final String TYPE_PDF = "pdf";
     public static final String TYPE_NOTIFICATION = "notification";
 
+    public int id;
     public String type;
     public String label;
+    public String lblClass;
     public String url;
     public String title;
     public String body;
