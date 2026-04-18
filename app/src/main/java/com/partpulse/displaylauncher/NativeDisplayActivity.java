@@ -309,12 +309,8 @@ public class NativeDisplayActivity extends Activity {
 
                 final Bitmap bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888);
                 bmp.eraseColor(0xFFFFFFFF);
-                bmp.setHasAlpha(false);
 
-                android.graphics.Matrix matrix = new android.graphics.Matrix();
-                matrix.setScale(scale, scale);
-
-                page.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
 
                 main.post(() -> {
                     pdfCanvas.setFilterBitmap(false);
