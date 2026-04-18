@@ -96,6 +96,8 @@ public class NativeDisplayActivity extends Activity {
         setContentView(R.layout.activity_native_display);
 
         pdfCanvas           = findViewById(R.id.pdfCanvas);
+        pdfCanvas.setFilterBitmap(false);
+        pdfCanvas.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         notificationOverlay = findViewById(R.id.notificationOverlay);
         notifTextPanel      = findViewById(R.id.notifTextPanel);
         notifImagePanel     = findViewById(R.id.notifImagePanel);
@@ -282,6 +284,7 @@ public class NativeDisplayActivity extends Activity {
             Log.w(TAG, "PDF missing: " + s.localPath);
             return;
         }
+
         final DisplayMetrics realDm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
         final int screenW = realDm.widthPixels;
@@ -299,16 +302,24 @@ public class NativeDisplayActivity extends Activity {
 
                 float pdfW = page.getWidth();
                 float pdfH = page.getHeight();
-                float targetW = screenW * 2.0f;
-                float targetH = screenH * 2.0f;
-                float scale = Math.min(targetW / pdfW, targetH / pdfH);
-                int bmpW = Math.max(1, (int)(pdfW * scale));
-                int bmpH = Math.max(1, (int)(pdfH * scale));
+
+                float scale = Math.min(screenW / pdfW, screenH / pdfH);
+                int bmpW = Math.max(1, Math.round(pdfW * scale));
+                int bmpH = Math.max(1, Math.round(pdfH * scale));
 
                 final Bitmap bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888);
                 bmp.eraseColor(0xFFFFFFFF);
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-                main.post(() -> pdfCanvas.setImageBitmap(bmp));
+                bmp.setHasAlpha(false);
+
+                android.graphics.Matrix matrix = new android.graphics.Matrix();
+                matrix.setScale(scale, scale);
+
+                page.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+
+                main.post(() -> {
+                    pdfCanvas.setFilterBitmap(false);
+                    pdfCanvas.setImageBitmap(bmp);
+                });
             } catch (Exception e) {
                 Log.e(TAG, "PDF render failed: " + e.getMessage());
             } finally {
