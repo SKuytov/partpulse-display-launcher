@@ -1,0 +1,356 @@
+package com.partpulse.displaylauncher;
+
+import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.pdf.PdfRenderer;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.ParcelFileDescriptor;
+import android.util.Log;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Main launcher activity — renders PDF slides natively via PdfRenderer
+ * and notification overlays. Replaces WebView-based DisplayActivity.
+ */
+public class NativeDisplayActivity extends Activity {
+
+    private static final String TAG = "NativeDisplay";
+    public static final String ACTION_SLIDES_UPDATED =
+        "com.partpulse.displaylauncher.SLIDES_UPDATED";
+
+    private ImageView pdfCanvas;
+    private LinearLayout notificationOverlay;
+    private TextView notifTitle, notifBody, notifDate;
+    private ImageView notifImage;
+    private LinearLayout hudOverlay;
+    private TextView hudLabel, hudClock;
+    private LinearLayout dotRow;
+    private ProgressBar loadingSpinner;
+
+    private SlideManager slideManager;
+    private AppPrefs prefs;
+    private final List<Slide> slides = new ArrayList<>();
+    private int currentIndex = 0;
+
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
+
+    private final Runnable advanceRunnable = new Runnable() {
+        @Override public void run() {
+            if (!slides.isEmpty()) {
+                currentIndex = (currentIndex + 1) % slides.size();
+                showSlide(currentIndex);
+            }
+            scheduleAdvance();
+        }
+    };
+
+    private final Runnable clockRunnable = new Runnable() {
+        @Override public void run() {
+            updateClock();
+            main.postDelayed(this, 60_000L);
+        }
+    };
+
+    private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context ctx, Intent intent) {
+            Log.i(TAG, "Slides update broadcast received, refreshing...");
+            loadSlides();
+        }
+    };
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setFullscreen();
+        setContentView(R.layout.activity_native_display);
+
+        pdfCanvas           = findViewById(R.id.pdfCanvas);
+        notificationOverlay = findViewById(R.id.notificationOverlay);
+        notifTitle          = findViewById(R.id.notifTitle);
+        notifBody           = findViewById(R.id.notifBody);
+        notifDate           = findViewById(R.id.notifDate);
+        notifImage          = findViewById(R.id.notifImage);
+        hudOverlay          = findViewById(R.id.hudOverlay);
+        hudLabel            = findViewById(R.id.hudLabel);
+        hudClock            = findViewById(R.id.hudClock);
+        dotRow              = findViewById(R.id.dotRow);
+        loadingSpinner      = findViewById(R.id.loadingSpinner);
+
+        prefs = new AppPrefs(this);
+        slideManager = new SlideManager();
+
+        main.post(clockRunnable);
+
+        IntentFilter filter = new IntentFilter(ACTION_SLIDES_UPDATED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(updateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(updateReceiver, filter);
+        }
+
+        loadSlides();
+        startSseService();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        main.removeCallbacksAndMessages(null);
+        try { unregisterReceiver(updateReceiver); } catch (Exception ignored) {}
+        renderExec.shutdownNow();
+    }
+
+    private void setFullscreen() {
+        View decor = getWindow().getDecorView();
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                  | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                  | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                  | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                  | View.SYSTEM_UI_FLAG_FULLSCREEN
+                  | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+        decor.setSystemUiVisibility(flags);
+    }
+
+    private void loadSlides() {
+        loadingSpinner.setVisibility(View.VISIBLE);
+        slideManager.refresh(this, new SlideManager.Callback() {
+            @Override public void onSlidesReady(List<Slide> newSlides, String hash) {
+                slides.clear();
+                slides.addAll(newSlides);
+                loadingSpinner.setVisibility(View.GONE);
+                if (slides.isEmpty()) {
+                    Log.w(TAG, "No slides to display");
+                    return;
+                }
+                buildDots();
+                currentIndex = Math.min(currentIndex, slides.size() - 1);
+                showSlide(currentIndex);
+                scheduleAdvance();
+            }
+            @Override public void onError(Exception e) {
+                Log.e(TAG, "Failed to load slides", e);
+                loadingSpinner.setVisibility(View.GONE);
+            }
+        });
+    }
+
+    private void startSseService() {
+        try {
+            Intent svc = new Intent(this, SseUpdateService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svc);
+            } else {
+                startService(svc);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "SSE service start failed: " + e.getMessage());
+        }
+    }
+
+    // ─── slide display ──────────────────────────────────────────────────────
+
+    private void showSlide(int index) {
+        if (index < 0 || index >= slides.size()) return;
+        final Slide s = slides.get(index);
+        hudLabel.setText(s.label == null ? "" : s.label);
+        updateDots(index);
+
+        if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
+            pdfCanvas.setVisibility(View.GONE);
+            notificationOverlay.setVisibility(View.VISIBLE);
+            notifTitle.setText(s.title == null ? "" : s.title);
+            notifBody.setText(s.body == null ? "" : s.body);
+            notifDate.setText(s.date == null ? "" : s.date);
+            if (s.localPath != null && new File(s.localPath).exists()) {
+                renderExec.execute(() -> {
+                    Bitmap bmp = BitmapFactory.decodeFile(s.localPath);
+                    main.post(() -> {
+                        if (bmp != null) {
+                            notifImage.setImageBitmap(bmp);
+                            notifImage.setVisibility(View.VISIBLE);
+                        } else {
+                            notifImage.setVisibility(View.GONE);
+                        }
+                    });
+                });
+            } else {
+                notifImage.setVisibility(View.GONE);
+            }
+        } else {
+            notificationOverlay.setVisibility(View.GONE);
+            pdfCanvas.setVisibility(View.VISIBLE);
+            renderPdf(s);
+        }
+    }
+
+    private void renderPdf(final Slide s) {
+        if (s.localPath == null) return;
+        final File pdfFile = new File(s.localPath);
+        if (!pdfFile.exists()) {
+            Log.w(TAG, "PDF missing: " + s.localPath);
+            return;
+        }
+        final int targetW = Math.max(pdfCanvas.getWidth(),
+            getWindow().getDecorView().getWidth());
+        renderExec.execute(() -> {
+            ParcelFileDescriptor pfd = null;
+            PdfRenderer renderer = null;
+            PdfRenderer.Page page = null;
+            try {
+                pfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
+                renderer = new PdfRenderer(pfd);
+                if (renderer.getPageCount() == 0) return;
+                page = renderer.openPage(0);
+                int w = targetW > 0 ? targetW : 1920;
+                int h = (int) (w * page.getHeight() / (float) page.getWidth());
+                if (h <= 0) h = 1080;
+                final Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                bmp.eraseColor(0xFFFFFFFF);
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                main.post(() -> pdfCanvas.setImageBitmap(bmp));
+            } catch (Exception e) {
+                Log.e(TAG, "PDF render failed for " + s.localPath, e);
+            } finally {
+                if (page != null) try { page.close(); } catch (Exception ignored) {}
+                if (renderer != null) try { renderer.close(); } catch (Exception ignored) {}
+                if (pfd != null) try { pfd.close(); } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    // ─── dots ───────────────────────────────────────────────────────────────
+
+    private void buildDots() {
+        dotRow.removeAllViews();
+        int size = dp(10);
+        int margin = dp(4);
+        for (int i = 0; i < slides.size(); i++) {
+            View dot = new View(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
+            lp.setMargins(margin, 0, margin, 0);
+            dot.setLayoutParams(lp);
+            GradientDrawable d = new GradientDrawable();
+            d.setShape(GradientDrawable.OVAL);
+            d.setColor(0x66FFFFFF);
+            dot.setBackground(d);
+            dotRow.addView(dot);
+        }
+    }
+
+    private void updateDots(int active) {
+        for (int i = 0; i < dotRow.getChildCount(); i++) {
+            View dot = dotRow.getChildAt(i);
+            GradientDrawable d = new GradientDrawable();
+            d.setShape(GradientDrawable.OVAL);
+            d.setColor(i == active ? 0xFFFFFFFF : 0x66FFFFFF);
+            dot.setBackground(d);
+        }
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density);
+    }
+
+    // ─── auto-advance ───────────────────────────────────────────────────────
+
+    private void scheduleAdvance() {
+        main.removeCallbacks(advanceRunnable);
+        int secs = prefs.getRefreshSeconds();
+        if (secs <= 0) secs = 60;
+        main.postDelayed(advanceRunnable, secs * 1000L);
+    }
+
+    private void prevSlide() {
+        if (slides.isEmpty()) return;
+        currentIndex = (currentIndex - 1 + slides.size()) % slides.size();
+        showSlide(currentIndex);
+        scheduleAdvance();
+    }
+
+    private void nextSlide() {
+        if (slides.isEmpty()) return;
+        currentIndex = (currentIndex + 1) % slides.size();
+        showSlide(currentIndex);
+        scheduleAdvance();
+    }
+
+    // ─── clock ──────────────────────────────────────────────────────────────
+
+    private void updateClock() {
+        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        hudClock.setText(fmt.format(new Date()));
+    }
+
+    // ─── D-pad / remote navigation ──────────────────────────────────────────
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            switch (event.getKeyCode()) {
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                    prevSlide();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    nextSlide();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    toggleHud();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                    toggleHud();
+                    return true;
+                case KeyEvent.KEYCODE_MENU:
+                case KeyEvent.KEYCODE_SETTINGS:
+                case KeyEvent.KEYCODE_BACK:
+                    openSettings();
+                    return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private void toggleHud() {
+        boolean show = hudOverlay.getVisibility() != View.VISIBLE;
+        hudOverlay.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            main.postDelayed(() -> hudOverlay.setVisibility(View.GONE), 4000L);
+        }
+    }
+
+    private void openSettings() {
+        if (prefs.isPinEnabled()) {
+            startActivity(new Intent(this, PinActivity.class));
+        } else {
+            startActivity(new Intent(this, SettingsActivity.class));
+        }
+    }
+}

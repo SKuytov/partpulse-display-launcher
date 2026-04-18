@@ -15,6 +15,7 @@ public class AppPrefs {
     private static final String KEY_PIN          = "pin_code";
     private static final String KEY_PIN_ENABLED  = "pin_enabled";
     private static final String KEY_TOOLBAR      = "toolbar_visible";
+    private static final String KEY_LAST_HASH    = "last_state_hash";
 
     // Defaults
     public static final String  DEFAULT_URL      = "https://skuytov.eu/grafik/index.php";
@@ -66,5 +67,13 @@ public class AppPrefs {
     }
     public void setToolbarVisible(boolean visible) {
         prefs.edit().putBoolean(KEY_TOOLBAR, visible).apply();
+    }
+
+    // --- Last known SSE state hash ---
+    public String getLastHash() {
+        return prefs.getString(KEY_LAST_HASH, "");
+    }
+    public void setLastHash(String hash) {
+        prefs.edit().putString(KEY_LAST_HASH, hash == null ? "" : hash).apply();
     }
 }

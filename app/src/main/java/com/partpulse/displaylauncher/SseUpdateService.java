@@ -13,6 +13,8 @@ import android.util.Log;
 
 import androidx.annotation.Nullable;
 
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -25,57 +27,42 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * Background service that holds an open SSE (Server-Sent Events) connection
- * to the display page's server.
+ * Background service that holds an open SSE connection to the schedule server.
  *
- * When the server pushes any SSE event (the admin saves changes), this service
- * broadcasts ACTION_CONTENT_UPDATED locally. DisplayActivity listens for that
- * broadcast and clears the WebView cache + reloads the page.
- *
- * Architecture:
- *   - Runs as a foreground service (required on Android 8+ for long-running tasks)
- *   - Uses OkHttp with infinite read timeout to keep the SSE stream open
- *   - Auto-reconnects after any error with exponential back-off (5s → 60s max)
- *   - Stops cleanly when the app process dies
- *
- * The SSE endpoint is derived from the display URL stored in AppPrefs:
- *   https://skuytov.eu/grafik/index.php  →  https://skuytov.eu/grafik/sse.php
- * The server emits "data: update\n\n" (or any event) whenever content changes.
- * We treat ANY received SSE line starting with "data:" as a trigger.
+ * Endpoint: events.php?hash=<lastKnownHash>
+ * Event:    "update" with JSON data {"hash": "<newHash>"}
+ * Behavior: broadcasts ACTION_SLIDES_UPDATED only when the hash changes.
  */
 public class SseUpdateService extends Service {
 
-    private static final String TAG          = "SseUpdateService";
-    public  static final String ACTION_CONTENT_UPDATED =
+    private static final String TAG = "SseUpdateService";
+
+    // New action (hash-driven slide refresh)
+    public static final String ACTION_SLIDES_UPDATED =
+        "com.partpulse.displaylauncher.SLIDES_UPDATED";
+    // Kept for compatibility with older code paths
+    public static final String ACTION_CONTENT_UPDATED =
         "com.partpulse.displaylauncher.CONTENT_UPDATED";
 
-    private static final String CHANNEL_ID   = "pp_sse_channel";
-    private static final int    NOTIF_ID     = 1001;
+    private static final String CHANNEL_ID = "pp_sse_channel";
+    private static final int    NOTIF_ID   = 1001;
 
-    // Back-off: start at 5 s, double on each failure, cap at 60 s
-    private static final long   BACKOFF_MIN  = 5_000L;
-    private static final long   BACKOFF_MAX  = 60_000L;
+    private static final long BACKOFF_MIN = 5_000L;
+    private static final long BACKOFF_MAX = 60_000L;
 
-    private OkHttpClient   httpClient;
+    private OkHttpClient httpClient;
     private volatile boolean running = true;
-    private Call           activeCall;
-    private final Handler  mainHandler = new Handler(Looper.getMainLooper());
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Service lifecycle
-    // ─────────────────────────────────────────────────────────────────────────
+    private Call activeCall;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     public void onCreate() {
         super.onCreate();
-
-        // OkHttp client — no read timeout so the SSE stream stays open
         httpClient = new OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MILLISECONDS) // infinite — required for SSE
+            .readTimeout(0, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true)
             .build();
-
         createNotificationChannel();
         startForeground(NOTIF_ID, buildNotification());
     }
@@ -83,11 +70,9 @@ public class SseUpdateService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         running = true;
-        // Run the SSE loop on a dedicated background thread
         Thread thread = new Thread(this::sseLoop, "SSE-Listener");
         thread.setDaemon(true);
         thread.start();
-        // STICKY: if killed by OS, restart automatically
         return START_STICKY;
     }
 
@@ -102,15 +87,15 @@ public class SseUpdateService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  SSE connection loop
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── SSE loop ───────────────────────────────────────────────────────────
 
     private void sseLoop() {
         long backoff = BACKOFF_MIN;
+        AppPrefs prefs = new AppPrefs(this);
 
         while (running) {
-            String sseUrl = buildSseUrl();
+            String currentHash = prefs.getLastHash();
+            String sseUrl = buildSseUrl(currentHash);
             Log.d(TAG, "Connecting to SSE: " + sseUrl);
 
             try {
@@ -128,8 +113,6 @@ public class SseUpdateService extends Service {
                         backoff = Math.min(backoff * 2, BACKOFF_MAX);
                         continue;
                     }
-
-                    // Connected — reset back-off
                     backoff = BACKOFF_MIN;
                     Log.d(TAG, "SSE connected");
 
@@ -139,15 +122,26 @@ public class SseUpdateService extends Service {
                     BufferedReader reader =
                         new BufferedReader(new InputStreamReader(body.byteStream()));
                     String line;
+                    String currentEvent = null;
+                    StringBuilder dataBuf = new StringBuilder();
+
                     while (running && (line = reader.readLine()) != null) {
-                        Log.v(TAG, "SSE line: " + line);
-                        // Any "data:" line from the server means content changed
-                        if (line.startsWith("data:")) {
-                            broadcastUpdate();
+                        if (line.isEmpty()) {
+                            // dispatch buffered event
+                            if (dataBuf.length() > 0) {
+                                handleEvent(currentEvent, dataBuf.toString(), prefs);
+                            }
+                            currentEvent = null;
+                            dataBuf.setLength(0);
+                        } else if (line.startsWith("event:")) {
+                            currentEvent = line.substring(6).trim();
+                        } else if (line.startsWith("data:")) {
+                            if (dataBuf.length() > 0) dataBuf.append('\n');
+                            dataBuf.append(line.substring(5).trim());
                         }
+                        // ignore id:, retry:, comments (":")
                     }
                 }
-
             } catch (IOException e) {
                 if (running) {
                     Log.w(TAG, "SSE connection lost: " + e.getMessage());
@@ -159,51 +153,69 @@ public class SseUpdateService extends Service {
         Log.d(TAG, "SSE loop ended");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    private void handleEvent(String event, String data, AppPrefs prefs) {
+        String eventName = event == null ? "message" : event;
+        Log.v(TAG, "SSE event=" + eventName + " data=" + data);
 
-    /**
-     * Derives the SSE endpoint from the stored display URL.
-     *
-     * Strategy:
-     *   1. Take the display URL (e.g. https://skuytov.eu/grafik/index.php)
-     *   2. Replace the filename with sse.php
-     *      → https://skuytov.eu/grafik/sse.php
-     *
-     * If the URL doesn't end in a .php file, append /sse.php to the base.
-     */
-    private String buildSseUrl() {
-        String displayUrl = new AppPrefs(this).getUrl();
+        if (!"update".equals(eventName) && !"message".equals(eventName)) return;
+
+        String newHash = null;
         try {
-            java.net.URL url = new java.net.URL(displayUrl);
-            String path = url.getPath(); // e.g. /grafik/index.php
-            String base = url.getProtocol() + "://" + url.getHost()
-                + (url.getPort() != -1 ? ":" + url.getPort() : "");
+            JSONObject j = new JSONObject(data);
+            newHash = j.optString("hash", null);
+        } catch (Exception ignore) {
+            // not JSON — fall through to broadcast as a legacy trigger
+        }
 
-            if (path.endsWith(".php")) {
-                // Replace filename
-                int slash = path.lastIndexOf('/');
-                path = path.substring(0, slash + 1) + "sse.php";
+        String currentHash = prefs.getLastHash();
+        if (newHash != null && !newHash.isEmpty()) {
+            if (!newHash.equals(currentHash)) {
+                prefs.setLastHash(newHash);
+                broadcastUpdate();
             } else {
-                // Append
-                if (!path.endsWith("/")) path += "/";
-                path += "sse.php";
+                Log.v(TAG, "Hash unchanged — skipping broadcast");
             }
-            return base + path;
-        } catch (Exception e) {
-            // Fallback: hard-coded known endpoint
-            return "https://skuytov.eu/grafik/sse.php";
+        } else {
+            // Legacy: no hash payload, just trigger a refresh
+            broadcastUpdate();
         }
     }
 
-    /** Broadcasts the update intent on the main thread. */
+    /**
+     * Builds: https://host/grafik/events.php?hash=<currentHash>
+     */
+    private String buildSseUrl(String currentHash) {
+        String displayUrl = new AppPrefs(this).getUrl();
+        try {
+            java.net.URL url = new java.net.URL(displayUrl);
+            String path = url.getPath();
+            String base = url.getProtocol() + "://" + url.getHost()
+                + (url.getPort() != -1 ? ":" + url.getPort() : "");
+            if (path.endsWith(".php")) {
+                int slash = path.lastIndexOf('/');
+                path = path.substring(0, slash + 1) + "events.php";
+            } else {
+                if (!path.endsWith("/")) path += "/";
+                path += "events.php";
+            }
+            String hashParam = currentHash == null ? "" : currentHash;
+            return base + path + "?hash=" + hashParam;
+        } catch (Exception e) {
+            return "https://skuytov.eu/grafik/events.php?hash=" +
+                (currentHash == null ? "" : currentHash);
+        }
+    }
+
     private void broadcastUpdate() {
         mainHandler.post(() -> {
-            Log.i(TAG, "SSE update received — broadcasting to DisplayActivity");
-            Intent intent = new Intent(ACTION_CONTENT_UPDATED);
-            intent.setPackage(getPackageName()); // explicit broadcast (Android 8+)
+            Log.i(TAG, "Broadcasting SLIDES_UPDATED");
+            Intent intent = new Intent(ACTION_SLIDES_UPDATED);
+            intent.setPackage(getPackageName());
             sendBroadcast(intent);
+            // Back-compat: also send the old action for any listeners that still use it
+            Intent legacy = new Intent(ACTION_CONTENT_UPDATED);
+            legacy.setPackage(getPackageName());
+            sendBroadcast(legacy);
         });
     }
 
@@ -211,16 +223,14 @@ public class SseUpdateService extends Service {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Foreground notification (required on Android 8+)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─── foreground notification ───────────────────────────────────────────
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
                 "PartPulse Live Sync",
-                NotificationManager.IMPORTANCE_MIN // silent, no sound
+                NotificationManager.IMPORTANCE_MIN
             );
             channel.setDescription("Monitors schedule updates in the background");
             channel.setShowBadge(false);
