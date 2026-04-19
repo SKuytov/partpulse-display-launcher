@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
@@ -54,6 +55,7 @@ public class SseUpdateService extends Service {
     private volatile boolean running = true;
     private Call activeCall;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -65,6 +67,17 @@ public class SseUpdateService extends Service {
             .build();
         createNotificationChannel();
         startForeground(NOTIF_ID, buildNotification());
+
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PartPulse:SseService");
+                wakeLock.setReferenceCounted(false);
+                if (!wakeLock.isHeld()) wakeLock.acquire();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock init failed: " + e.getMessage());
+        }
     }
 
     @Override
@@ -80,6 +93,9 @@ public class SseUpdateService extends Service {
     public void onDestroy() {
         running = false;
         if (activeCall != null) activeCall.cancel();
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Exception ignored) {}
         super.onDestroy();
     }
 

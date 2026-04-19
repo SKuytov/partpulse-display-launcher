@@ -13,6 +13,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -66,6 +68,25 @@ public class NativeDisplayActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
 
+    private PowerManager.WakeLock screenWakeLock;
+    private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
+
+    private final Runnable keepAliveRunnable = new Runnable() {
+        @Override public void run() {
+            try {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    pm.userActivity(SystemClock.uptimeMillis(), false);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "userActivity failed: " + e.getMessage());
+            }
+            runOnUiThread(() ->
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
+            main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
+        }
+    };
+
     private final Runnable advanceRunnable = new Runnable() {
         @Override public void run() {
             if (!slides.isEmpty()) {
@@ -94,6 +115,19 @@ public class NativeDisplayActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                screenWakeLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE,
+                    "PartPulse:ScreenKeepOn");
+                screenWakeLock.setReferenceCounted(false);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock init failed: " + e.getMessage());
+        }
+
         setFullscreen();
         setContentView(R.layout.activity_native_display);
 
@@ -129,10 +163,35 @@ public class NativeDisplayActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        try {
+            if (screenWakeLock != null && !screenWakeLock.isHeld()) screenWakeLock.acquire();
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock acquire failed: " + e.getMessage());
+        }
+        main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        main.removeCallbacks(keepAliveRunnable);
+        try {
+            if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock release failed: " + e.getMessage());
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         main.removeCallbacksAndMessages(null);
         try { unregisterReceiver(updateReceiver); } catch (Exception ignored) {}
+        try {
+            if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
+        } catch (Exception ignored) {}
         renderExec.shutdownNow();
     }
 
