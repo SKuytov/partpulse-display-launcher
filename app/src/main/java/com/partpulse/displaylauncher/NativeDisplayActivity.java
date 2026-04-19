@@ -304,6 +304,9 @@ public class NativeDisplayActivity extends Activity {
         }
 
         animateProgress(Math.max(1, s.duration) * 1000);
+
+        // Prefetch the next slide in background so it's ready when auto-advance fires
+        prefetchNextSlide(index);
     }
 
     private void applyLabelChip(Slide s) {
@@ -467,6 +470,22 @@ public class NativeDisplayActivity extends Activity {
     }
 
     // ─── pre-render ─────────────────────────────────────────────────────────
+
+    /**
+     * Immediately start rendering the NEXT slide in background.
+     * Called after showSlide() so by the time auto-advance fires, it's already in cache.
+     */
+    private void prefetchNextSlide(int currentIdx) {
+        if (slides.isEmpty()) return;
+        int nextIdx = (currentIdx + 1) % slides.size();
+        Slide next = slides.get(nextIdx);
+        if (Slide.TYPE_PDF.equals(next.type) && next.localPath != null) {
+            // Only prefetch if not already in memory cache
+            if (bitmapCache.get(next.localPath) == null) {
+                renderPdf(next); // queued on renderExec, runs in background
+            }
+        }
+    }
 
     /** Render all PDF slides in background so every slide is instant on display. */
     private void preRenderAllSlides() {
