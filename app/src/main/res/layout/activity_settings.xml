@@ -171,6 +171,88 @@
                     android:trackTint="#334455" />
             </LinearLayout>
 
+            <View style="@style/Divider" />
+
+            <!-- ── WEATHER SECTION ──────────────────────────────── -->
+            <TextView style="@style/SectionHeader" android:text="WEATHER" />
+
+            <TextView
+                android:id="@+id/tvWeatherCity"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="City: Ruse"
+                android:textColor="#CCCCDD"
+                android:textSize="14sp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView style="@style/FieldLabel" android:text="City name" />
+            <EditText
+                android:id="@+id/etWeatherCity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:textColor="#EEEEFF"
+                android:background="@drawable/input_bg"
+                android:padding="12dp"
+                android:textSize="15sp"
+                android:layout_marginBottom="12dp"
+                android:hint="Ruse"
+                android:textColorHint="#666688" />
+
+            <Button
+                android:id="@+id/btnRefreshWeather"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="Refresh Weather"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:background="@drawable/btn_primary"
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/tvWeatherResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="—"
+                android:textColor="#EEEEFF"
+                android:textSize="15sp"
+                android:layout_marginBottom="24dp" />
+
+            <View style="@style/Divider" />
+
+            <!-- ── HOLIDAYS SECTION ─────────────────────────────── -->
+            <TextView style="@style/SectionHeader" android:text="HOLIDAYS" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Next 5 Bulgarian public holidays"
+                android:textColor="#CCCCDD"
+                android:textSize="14sp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tvHolidays"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#EEEEFF"
+                android:textSize="14sp"
+                android:lineSpacingExtra="4dp"
+                android:layout_marginBottom="24dp" />
+
+            <View style="@style/Divider" />
+
+            <!-- ── SLIDE TIMING SECTION ─────────────────────────── -->
+            <TextView style="@style/SectionHeader" android:text="SLIDE TIMING" />
+
+            <TextView style="@style/FieldLabel" android:text="Default slide duration (seconds)" />
+            <Spinner
+                android:id="@+id/spSlideDuration"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/input_bg"
+                android:layout_marginBottom="24dp" />
+
             <!-- Save button -->
             <Button
                 android:id="@+id/btnSave"

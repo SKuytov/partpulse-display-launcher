@@ -22,6 +22,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -50,7 +51,7 @@ public class NativeDisplayActivity extends Activity {
         "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
     private PdfPageView pdfCanvas;
-    private LinearLayout notificationOverlay;
+    private FrameLayout notificationOverlay;
     private LinearLayout notifTextPanel;
     private LinearLayout notifImagePanel;
     private TextView notifTag, notifTitle, notifBody, notifDate;
@@ -559,6 +560,7 @@ public class NativeDisplayActivity extends Activity {
             secs = slides.get(currentIndex).duration;
         }
         if (secs <= 0) secs = prefs.getRefreshSeconds();
+        if (secs <= 0) secs = prefs.getDefaultSlideDuration();
         if (secs <= 0) secs = 10;
         main.postDelayed(advanceRunnable, secs * 1000L);
     }

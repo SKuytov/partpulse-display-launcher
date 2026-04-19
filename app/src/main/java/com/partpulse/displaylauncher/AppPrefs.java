@@ -76,4 +76,12 @@ public class AppPrefs {
     public void setLastHash(String hash) {
         prefs.edit().putString(KEY_LAST_HASH, hash == null ? "" : hash).apply();
     }
+
+    // --- Weather city ---
+    public String getWeatherCity() { return prefs.getString("weather_city", "Ruse"); }
+    public void setWeatherCity(String city) { prefs.edit().putString("weather_city", city).apply(); }
+
+    // --- Default slide duration (seconds) ---
+    public int getDefaultSlideDuration() { return prefs.getInt("default_slide_duration", 10); }
+    public void setDefaultSlideDuration(int secs) { prefs.edit().putInt("default_slide_duration", secs).apply(); }
 }

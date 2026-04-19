@@ -19,6 +19,22 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+
 /**
  * Settings screen — D-pad navigable via dispatchKeyEvent.
  *
@@ -29,13 +45,10 @@ import androidx.appcompat.app.AppCompatActivity;
  *   3  New PIN field          (hidden when PIN disabled)
  *   4  Confirm PIN field      (hidden when PIN disabled)
  *   5  Toolbar switch
- *   6  Save button            ← always scrolled into view when reached
- *
- * LEFT/RIGHT:  on spinner → change value; on switches → toggle
- * ENTER:       on text fields → open keyboard; on spinner → open dropdown;
- *              on switches → toggle; on Save → save
- * DOWN (while keyboard open) → close keyboard
- * BACK:        close keyboard if open, else leave settings
+ *   6  Weather city EditText
+ *   7  Refresh Weather button
+ *   8  Slide duration spinner
+ *   9  Save button
  */
 public class SettingsActivity extends AppCompatActivity {
 
@@ -44,14 +57,22 @@ public class SettingsActivity extends AppCompatActivity {
     private static final int[] REFRESH_VALUES =
         {    0,     30,      60,     120,     300,      600   };
 
-    private static final int ROW_URL     = 0;
-    private static final int ROW_REFRESH = 1;
-    private static final int ROW_PIN_SW  = 2;
-    private static final int ROW_PIN1    = 3;
-    private static final int ROW_PIN2    = 4;
-    private static final int ROW_TOOLBAR = 5;
-    private static final int ROW_SAVE    = 6;
-    private static final int ROW_MAX     = 6;
+    private static final String[] SLIDE_DURATION_LABELS =
+        { "5 s", "10 s", "15 s", "20 s", "30 s", "45 s", "60 s" };
+    private static final int[] SLIDE_DURATION_VALUES =
+        {    5,    10,     15,     20,     30,     45,     60   };
+
+    private static final int ROW_URL           = 0;
+    private static final int ROW_REFRESH       = 1;
+    private static final int ROW_PIN_SW        = 2;
+    private static final int ROW_PIN1          = 3;
+    private static final int ROW_PIN2          = 4;
+    private static final int ROW_TOOLBAR       = 5;
+    private static final int ROW_WEATHER_CITY  = 6;
+    private static final int ROW_WEATHER_BTN   = 7;
+    private static final int ROW_SLIDE_DUR     = 8;
+    private static final int ROW_SAVE          = 9;
+    private static final int ROW_MAX           = 9;
 
     private AppPrefs   prefs;
     private int        cursor     = 0;
@@ -65,10 +86,20 @@ public class SettingsActivity extends AppCompatActivity {
     private EditText     etPin1, etPin2;
     private TextView     tvPinMismatch;
     private Switch       swToolbar;
+    private TextView     tvWeatherCity;
+    private EditText     etWeatherCity;
+    private Button       btnRefreshWeather;
+    private TextView     tvWeatherResult;
+    private TextView     tvHolidays;
+    private Spinner      spSlideDuration;
     private Button       btnSave;
 
     // All row anchor views — used for scrolling to the active row
     private View[] rowViews;
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService weatherExec = Executors.newSingleThreadExecutor();
+    private final OkHttpClient http = new OkHttpClient();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,19 +115,27 @@ public class SettingsActivity extends AppCompatActivity {
             getSupportActionBar().setTitle("Settings");
         }
 
-        scrollView    = findViewById(R.id.settingsScroll);
-        etUrl         = findViewById(R.id.etUrl);
-        spRefresh     = findViewById(R.id.spRefresh);
-        swPinEnabled  = findViewById(R.id.swPinEnabled);
-        layoutNewPin  = findViewById(R.id.layoutNewPin);
-        etPin1        = findViewById(R.id.etPin1);
-        etPin2        = findViewById(R.id.etPin2);
-        tvPinMismatch = findViewById(R.id.tvPinMismatch);
-        swToolbar     = findViewById(R.id.swToolbar);
-        btnSave       = findViewById(R.id.btnSave);
+        scrollView        = findViewById(R.id.settingsScroll);
+        etUrl             = findViewById(R.id.etUrl);
+        spRefresh         = findViewById(R.id.spRefresh);
+        swPinEnabled      = findViewById(R.id.swPinEnabled);
+        layoutNewPin      = findViewById(R.id.layoutNewPin);
+        etPin1            = findViewById(R.id.etPin1);
+        etPin2            = findViewById(R.id.etPin2);
+        tvPinMismatch     = findViewById(R.id.tvPinMismatch);
+        swToolbar         = findViewById(R.id.swToolbar);
+        tvWeatherCity     = findViewById(R.id.tvWeatherCity);
+        etWeatherCity     = findViewById(R.id.etWeatherCity);
+        btnRefreshWeather = findViewById(R.id.btnRefreshWeather);
+        tvWeatherResult   = findViewById(R.id.tvWeatherResult);
+        tvHolidays        = findViewById(R.id.tvHolidays);
+        spSlideDuration   = findViewById(R.id.spSlideDuration);
+        btnSave           = findViewById(R.id.btnSave);
 
         rowViews = new View[]{ etUrl, spRefresh, swPinEnabled,
-                               etPin1, etPin2, swToolbar, btnSave };
+                               etPin1, etPin2, swToolbar,
+                               etWeatherCity, btnRefreshWeather, spSlideDuration,
+                               btnSave };
 
         // Disable View focus system — we manage focus manually
         for (View v : rowViews) {
@@ -120,6 +159,25 @@ public class SettingsActivity extends AppCompatActivity {
         layoutNewPin.setVisibility(prefs.isPinEnabled() ? View.VISIBLE : View.GONE);
         etPin1.setHint("New PIN (current: " + prefs.getPin() + ")");
         swToolbar.setChecked(prefs.isToolbarVisible());
+
+        // Weather
+        String city = prefs.getWeatherCity();
+        tvWeatherCity.setText("City: " + city);
+        etWeatherCity.setText(city);
+        btnRefreshWeather.setOnClickListener(v -> fetchWeather());
+
+        // Holidays
+        tvHolidays.setText(buildUpcomingHolidays(5));
+
+        // Slide duration spinner
+        ArrayAdapter<String> slideAdapter = new ArrayAdapter<>(
+            this, android.R.layout.simple_spinner_item, SLIDE_DURATION_LABELS);
+        slideAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spSlideDuration.setAdapter(slideAdapter);
+        int curDur = prefs.getDefaultSlideDuration();
+        for (int i = 0; i < SLIDE_DURATION_VALUES.length; i++) {
+            if (SLIDE_DURATION_VALUES[i] == curDur) { spSlideDuration.setSelection(i); break; }
+        }
 
         etPin2.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
@@ -183,7 +241,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         // Skip PIN input rows if PIN switch is off
         if (!swPinEnabled.isChecked()) {
-            if (next == ROW_PIN1 || next == ROW_PIN2) next += delta;
+            while (next == ROW_PIN1 || next == ROW_PIN2) next += delta;
         }
 
         cursor = Math.max(0, Math.min(ROW_MAX, next));
@@ -199,6 +257,11 @@ public class SettingsActivity extends AppCompatActivity {
                 break;
             case ROW_PIN_SW: togglePinSwitch();       break;
             case ROW_TOOLBAR: swToolbar.toggle();     break;
+            case ROW_SLIDE_DUR:
+                int p = spSlideDuration.getSelectedItemPosition() + delta;
+                spSlideDuration.setSelection(
+                    Math.max(0, Math.min(SLIDE_DURATION_LABELS.length - 1, p)));
+                break;
         }
     }
 
@@ -207,12 +270,15 @@ public class SettingsActivity extends AppCompatActivity {
             case ROW_URL:
             case ROW_PIN1:
             case ROW_PIN2:
+            case ROW_WEATHER_CITY:
                 openKeyboard(rowViews[cursor]);
                 break;
-            case ROW_REFRESH:  spRefresh.performClick();      break;
-            case ROW_PIN_SW:   togglePinSwitch();             break;
-            case ROW_TOOLBAR:  swToolbar.toggle();            break;
-            case ROW_SAVE:     saveAndClose();                break;
+            case ROW_REFRESH:      spRefresh.performClick();       break;
+            case ROW_PIN_SW:       togglePinSwitch();              break;
+            case ROW_TOOLBAR:      swToolbar.toggle();             break;
+            case ROW_WEATHER_BTN:  fetchWeather();                 break;
+            case ROW_SLIDE_DUR:    spSlideDuration.performClick(); break;
+            case ROW_SAVE:         saveAndClose();                 break;
         }
     }
 
@@ -227,14 +293,13 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void scrollToCursor() {
         final View target = rowViews[cursor];
-        // Post so the layout has time to settle (especially after PIN section shows/hides)
         scrollView.post(() -> {
             int[] loc = new int[2];
             target.getLocationOnScreen(loc);
             int[] scrollLoc = new int[2];
             scrollView.getLocationOnScreen(scrollLoc);
             int relativeTop = loc[1] - scrollLoc[1] + scrollView.getScrollY();
-            int targetScroll = relativeTop - 80; // 80dp padding above active row
+            int targetScroll = relativeTop - 80;
             scrollView.smoothScrollTo(0, Math.max(0, targetScroll));
         });
     }
@@ -251,7 +316,17 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void clearHighlight(int idx) {
         View v = rowViews[idx];
-        v.setBackground(null);
+        // Restore the default spinner background for spinner rows
+        if (idx == ROW_REFRESH || idx == ROW_SLIDE_DUR) {
+            v.setBackgroundResource(R.drawable.input_bg);
+        } else if (idx == ROW_URL || idx == ROW_PIN1 || idx == ROW_PIN2
+                   || idx == ROW_WEATHER_CITY) {
+            v.setBackgroundResource(R.drawable.input_bg);
+        } else if (idx == ROW_WEATHER_BTN || idx == ROW_SAVE) {
+            v.setBackgroundResource(R.drawable.btn_primary);
+        } else {
+            v.setBackground(null);
+        }
         v.setPadding(0, 0, 0, 0);
     }
 
@@ -286,6 +361,99 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  Weather
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void fetchWeather() {
+        final String city = etWeatherCity.getText().toString().trim().isEmpty()
+            ? prefs.getWeatherCity()
+            : etWeatherCity.getText().toString().trim();
+        prefs.setWeatherCity(city);
+        tvWeatherCity.setText("City: " + city);
+        tvWeatherResult.setText("Loading…");
+
+        weatherExec.execute(() -> {
+            String url = "https://wttr.in/" + city.replace(" ", "+") + "?format=3";
+            Request req = new Request.Builder().url(url).build();
+            try (Response resp = http.newCall(req).execute()) {
+                ResponseBody body = resp.body();
+                String result = (body != null) ? body.string().trim() : "";
+                final String text = result.isEmpty() ? "No data" : result;
+                mainHandler.post(() -> tvWeatherResult.setText(text));
+            } catch (IOException e) {
+                mainHandler.post(() -> tvWeatherResult.setText("Error: " + e.getMessage()));
+            }
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Holidays
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static class Holiday {
+        final int month; // 1-12
+        final int day;
+        final String name;
+        Holiday(int m, int d, String n) { month = m; day = d; name = n; }
+    }
+
+    private static final Holiday[] BG_HOLIDAYS = new Holiday[]{
+        new Holiday(1,  1,  "New Year"),
+        new Holiday(3,  3,  "Liberation Day"),
+        new Holiday(5,  1,  "Labour Day"),
+        new Holiday(5,  6,  "St. George's Day / Army Day"),
+        new Holiday(5,  24, "Education and Culture Day"),
+        new Holiday(9,  6,  "Unification Day"),
+        new Holiday(9,  22, "Independence Day"),
+        new Holiday(11, 1,  "National Revival Day"),
+        new Holiday(12, 24, "Christmas Eve"),
+        new Holiday(12, 25, "Christmas Day"),
+        new Holiday(12, 26, "Christmas Day 2"),
+    };
+
+    private String buildUpcomingHolidays(int count) {
+        Calendar today = Calendar.getInstance();
+        int todayYear  = today.get(Calendar.YEAR);
+        // Collect upcoming (this year from today, then next year) until count reached
+        List<Calendar> upcoming = new ArrayList<>();
+        List<String>   names    = new ArrayList<>();
+
+        int[] years = { todayYear, todayYear + 1 };
+        for (int y : years) {
+            for (Holiday h : BG_HOLIDAYS) {
+                Calendar c = Calendar.getInstance();
+                c.clear();
+                c.set(y, h.month - 1, h.day);
+                if (!c.before(stripTime(today))) {
+                    upcoming.add(c);
+                    names.add(h.name);
+                    if (upcoming.size() >= count) break;
+                }
+            }
+            if (upcoming.size() >= count) break;
+        }
+
+        SimpleDateFormat fmt = new SimpleDateFormat("d MMM", Locale.ENGLISH);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < upcoming.size(); i++) {
+            if (i > 0) sb.append("\n");
+            sb.append(fmt.format(upcoming.get(i).getTime()))
+              .append(" — ")
+              .append(names.get(i));
+        }
+        return sb.toString();
+    }
+
+    private static Calendar stripTime(Calendar c) {
+        Calendar out = (Calendar) c.clone();
+        out.set(Calendar.HOUR_OF_DAY, 0);
+        out.set(Calendar.MINUTE, 0);
+        out.set(Calendar.SECOND, 0);
+        out.set(Calendar.MILLISECOND, 0);
+        return out;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  Save
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -316,6 +484,13 @@ public class SettingsActivity extends AppCompatActivity {
         }
 
         prefs.setToolbarVisible(swToolbar.isChecked());
+
+        String city = etWeatherCity.getText().toString().trim();
+        if (!city.isEmpty()) prefs.setWeatherCity(city);
+
+        prefs.setDefaultSlideDuration(
+            SLIDE_DURATION_VALUES[spSlideDuration.getSelectedItemPosition()]);
+
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show();
         finish();
     }
