@@ -412,16 +412,14 @@ public class NativeDisplayActivity extends Activity {
                 if (bmp == null) return;
                 final Bitmap finalBmp = bmp;
 
-                final Bitmap bmpToSave = finalBmp;
-                renderExec.execute(() -> {
-                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
-                        bmpToSave.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                        Log.i(TAG, "PNG cache saved: " + pngCache.getName());
-                    } catch (Exception e) {
-                        Log.w(TAG, "PNG cache save failed: " + e.getMessage());
-                        pngCache.delete();
-                    }
-                });
+                // Save PNG inline on this bg thread (can't re-submit to same executor — deadlock)
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
+                    finalBmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                    Log.i(TAG, "PNG cache saved: " + pngCache.getName());
+                } catch (Exception e) {
+                    Log.w(TAG, "PNG cache save failed: " + e.getMessage());
+                    pngCache.delete();
+                }
 
                 main.post(() -> {
                     pdfCanvas.setVisibility(View.VISIBLE);
