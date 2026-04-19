@@ -22,7 +22,6 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -53,8 +52,9 @@ public class NativeDisplayActivity extends Activity {
     private PdfPageView pdfCanvas;
     private LinearLayout notificationOverlay;
     private LinearLayout notifTextPanel;
-    private FrameLayout notifImagePanel;
+    private LinearLayout notifImagePanel;
     private TextView notifTag, notifTitle, notifBody, notifDate;
+    private TextView notifTagNoImg, notifTitleNoImg, notifBodyNoImg, notifDateNoImg;
     private ImageView notifImage;
     private TextView hudLabel, hudClock;
     private LinearLayout dotRow;
@@ -156,6 +156,10 @@ public class NativeDisplayActivity extends Activity {
         notifBody           = findViewById(R.id.notifBody);
         notifDate           = findViewById(R.id.notifDate);
         notifImage          = findViewById(R.id.notifImage);
+        notifTagNoImg       = findViewById(R.id.notifTagNoImg);
+        notifTitleNoImg     = findViewById(R.id.notifTitleNoImg);
+        notifBodyNoImg      = findViewById(R.id.notifBodyNoImg);
+        notifDateNoImg      = findViewById(R.id.notifDateNoImg);
         hudLabel            = findViewById(R.id.hudLabel);
         hudClock            = findViewById(R.id.hudClock);
         dotRow              = findViewById(R.id.dotRow);
@@ -273,29 +277,32 @@ public class NativeDisplayActivity extends Activity {
             pdfCanvas.setVisibility(View.GONE);
             notificationOverlay.setVisibility(View.VISIBLE);
 
-            String tagText = (s.label == null || s.label.isEmpty()) ? "Съобщение" : s.label;
-            notifTag.setText("● " + tagText);
-            notifTitle.setText(s.title == null ? "" : s.title);
-            notifBody.setText(s.body == null ? "" : s.body);
-            notifDate.setText(s.date == null ? "" : s.date);
+            String tagText = (s.lblClass != null && !s.lblClass.isEmpty())
+                    ? s.lblClass.toUpperCase() : "ИЗВЕСТИЕ";
 
-            boolean hasImage = s.localPath != null && new File(s.localPath).exists();
+            boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
+                    && new File(s.localPath).exists();
             if (hasImage) {
-                notifImagePanel.setVisibility(View.VISIBLE);
+                notifImage.setVisibility(View.VISIBLE);
+                notifTextPanel.setVisibility(View.VISIBLE);
+                notifImagePanel.setVisibility(View.GONE);
+
                 final String path = s.localPath;
                 renderExec.execute(() -> {
-                    Bitmap bmp = BitmapFactory.decodeFile(path);
+                    final Bitmap bmp = BitmapFactory.decodeFile(path);
                     main.post(() -> {
                         if (bmp != null) {
                             notifImage.setImageBitmap(bmp);
-                            notifImagePanel.setVisibility(View.VISIBLE);
-                        } else {
-                            notifImagePanel.setVisibility(View.GONE);
                         }
                     });
                 });
+
+                notifTag.setText(tagText);
+                notifTitle.setText(s.title != null ? s.title : "");
+                notifBody.setText(s.body != null ? s.body : "");
+                notifDate.setText(s.date != null ? s.date : "");
             } else {
-                notifImagePanel.setVisibility(View.GONE);
+                showNotifNoImage(s, tagText);
             }
         } else {
             notificationOverlay.setVisibility(View.GONE);
@@ -307,6 +314,17 @@ public class NativeDisplayActivity extends Activity {
 
         // Prefetch the next slide in background so it's ready when auto-advance fires
         prefetchNextSlide(index);
+    }
+
+    private void showNotifNoImage(Slide s, String tagText) {
+        notifImage.setVisibility(View.GONE);
+        notifTextPanel.setVisibility(View.GONE);
+        notifImagePanel.setVisibility(View.VISIBLE);
+
+        notifTagNoImg.setText(tagText);
+        notifTitleNoImg.setText(s.title != null ? s.title : "");
+        notifBodyNoImg.setText(s.body != null ? s.body : "");
+        notifDateNoImg.setText(s.date != null ? s.date : "");
     }
 
     private void applyLabelChip(Slide s) {
