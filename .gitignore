@@ -20,3 +20,8 @@ app/build/
 # OS
 .DS_Store
 Thumbs.db
+# Claude Code / MCP
+.claude/
+.mcp.json
+CLAUDE.md
+
