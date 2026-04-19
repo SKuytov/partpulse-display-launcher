@@ -74,9 +74,14 @@ public class NativeDisplayActivity extends Activity {
     private final Runnable keepAliveRunnable = new Runnable() {
         @Override public void run() {
             try {
+                // userActivity() is @hide — use reflection so it compiles against public SDK
                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                 if (pm != null) {
-                    pm.userActivity(SystemClock.uptimeMillis(), false);
+                    try {
+                        java.lang.reflect.Method ua = pm.getClass()
+                            .getMethod("userActivity", long.class, boolean.class);
+                        ua.invoke(pm, SystemClock.uptimeMillis(), false);
+                    } catch (Exception ignored) { /* not available on this firmware */ }
                 }
             } catch (Exception e) {
                 Log.w(TAG, "userActivity failed: " + e.getMessage());
