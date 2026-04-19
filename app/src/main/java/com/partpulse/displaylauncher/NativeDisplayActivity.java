@@ -17,6 +17,7 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
@@ -68,6 +69,15 @@ public class NativeDisplayActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
     private final ExecutorService saveExec   = Executors.newSingleThreadExecutor(); // dedicated PNG save thread
+
+    // In-memory bitmap cache: key = localPath, value = rendered Bitmap
+    // Use 1/4 of available heap — keeps rendered bitmaps across slide cycles
+    private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
+            (int)(Runtime.getRuntime().maxMemory() / 4)) {
+        @Override protected int sizeOf(String key, Bitmap value) {
+            return value.getByteCount();
+        }
+    };
 
     private PowerManager.WakeLock screenWakeLock;
     private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
@@ -218,6 +228,7 @@ public class NativeDisplayActivity extends Activity {
             @Override public void onSlidesReady(List<Slide> newSlides, String hash) {
                 slides.clear();
                 slides.addAll(newSlides);
+                bitmapCache.evictAll(); // clear stale bitmaps from previous schedule
                 loadingSpinner.setVisibility(View.GONE);
                 if (slides.isEmpty()) {
                     Log.w(TAG, "No slides to display");
@@ -361,6 +372,17 @@ public class NativeDisplayActivity extends Activity {
         final int screenH = realDm.heightPixels;
         final Context appContext = getApplicationContext();
 
+        // Memory cache hit — instant, no disk I/O
+        Bitmap memCached = bitmapCache.get(pdfFile.getAbsolutePath());
+        if (memCached != null) {
+            final Bitmap mc = memCached;
+            main.post(() -> {
+                pdfCanvas.setVisibility(View.VISIBLE);
+                pdfCanvas.setBitmap(mc);
+            });
+            return;
+        }
+
         renderExec.execute(() -> {
             if (pngCache.exists()) {
                 try {
@@ -369,6 +391,7 @@ public class NativeDisplayActivity extends Activity {
                     final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
                     if (cached != null) {
                         Log.i(TAG, "JPEG cache hit: " + pngCache.getName());
+                        bitmapCache.put(pdfFile.getAbsolutePath(), cached); // store in memory too
                         main.post(() -> {
                             pdfCanvas.setVisibility(View.VISIBLE);
                             pdfCanvas.setBitmap(cached);
@@ -413,7 +436,10 @@ public class NativeDisplayActivity extends Activity {
                 if (bmp == null) return;
                 final Bitmap finalBmp = bmp;
 
-                // Show bitmap immediately — don't block on PNG write
+                // Store in memory cache for instant access on next slide cycle
+                bitmapCache.put(pdfFile.getAbsolutePath(), finalBmp);
+
+                // Show bitmap immediately — don't block on JPEG write
                 main.post(() -> {
                     pdfCanvas.setVisibility(View.VISIBLE);
                     pdfCanvas.setBitmap(finalBmp);
@@ -438,6 +464,20 @@ public class NativeDisplayActivity extends Activity {
                 } catch (Exception ignored) {}
             }
         });
+    }
+
+    // ─── pre-render ─────────────────────────────────────────────────────────
+
+    /** Render all PDF slides in background so every slide is instant on display. */
+    private void preRenderAllSlides() {
+        for (int i = 0; i < slides.size(); i++) {
+            final Slide s = slides.get(i);
+            if ("pdf".equals(s.type) && s.localPath != null) {
+                final int idx = i;
+                if (idx == currentIndex) continue; // already rendered by showSlide
+                renderPdf(s); // queued on renderExec, runs sequentially in background
+            }
+        }
     }
 
     // ─── dots ───────────────────────────────────────────────────────────────
