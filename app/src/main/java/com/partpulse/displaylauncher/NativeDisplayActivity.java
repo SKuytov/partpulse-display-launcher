@@ -289,11 +289,34 @@ public class NativeDisplayActivity extends Activity {
                 notifImagePanel.setVisibility(View.GONE);
 
                 final String path = s.localPath;
+                final int screenW, screenH;
+                {
+                    android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+                    getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+                    screenW = dm.widthPixels;
+                    screenH = dm.heightPixels;
+                }
                 renderExec.execute(() -> {
-                    final Bitmap bmp = BitmapFactory.decodeFile(path);
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inJustDecodeBounds = true;
+                    BitmapFactory.decodeFile(path, opts);
+                    opts.inSampleSize = 1;
+                    if (opts.outWidth > 0 && opts.outHeight > 0) {
+                        int sw = opts.outWidth / screenW;
+                        int sh = opts.outHeight / screenH;
+                        int s2 = Math.min(sw, sh);
+                        if (s2 > 1) opts.inSampleSize = s2;
+                    }
+                    opts.inJustDecodeBounds = false;
+                    opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                    final Bitmap bmp = BitmapFactory.decodeFile(path, opts);
                     main.post(() -> {
                         if (bmp != null) {
+                            notifImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
                             notifImage.setImageBitmap(bmp);
+                            notifImage.setLayoutParams(new android.widget.FrameLayout.LayoutParams(
+                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
                         }
                     });
                 });
@@ -302,6 +325,8 @@ public class NativeDisplayActivity extends Activity {
                 notifTitle.setText(s.title != null ? s.title : "");
                 notifBody.setText(s.body != null ? s.body : "");
                 notifDate.setText(s.date != null ? s.date : "");
+                notifTextPanel.bringToFront();
+                notifTextPanel.setVisibility(View.VISIBLE);
             } else {
                 showNotifNoImage(s, tagText);
             }
@@ -615,7 +640,9 @@ public class NativeDisplayActivity extends Activity {
 
     private void openSettings() {
         if (prefs.isPinEnabled()) {
-            startActivity(new Intent(this, PinActivity.class));
+            Intent intent = new Intent(this, PinActivity.class);
+            intent.putExtra(PinActivity.EXTRA_TARGET, PinActivity.TARGET_SETTINGS);
+            startActivity(intent);
         } else {
             startActivity(new Intent(this, SettingsActivity.class));
         }
