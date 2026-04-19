@@ -67,6 +67,7 @@ public class NativeDisplayActivity extends Activity {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
+    private final ExecutorService saveExec   = Executors.newSingleThreadExecutor(); // dedicated PNG save thread
 
     private PowerManager.WakeLock screenWakeLock;
     private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
@@ -412,18 +413,21 @@ public class NativeDisplayActivity extends Activity {
                 if (bmp == null) return;
                 final Bitmap finalBmp = bmp;
 
-                // Save PNG inline on this bg thread (can't re-submit to same executor — deadlock)
-                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
-                    finalBmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                    Log.i(TAG, "PNG cache saved: " + pngCache.getName());
-                } catch (Exception e) {
-                    Log.w(TAG, "PNG cache save failed: " + e.getMessage());
-                    pngCache.delete();
-                }
-
+                // Show bitmap immediately — don't block on PNG write
                 main.post(() -> {
                     pdfCanvas.setVisibility(View.VISIBLE);
                     pdfCanvas.setBitmap(finalBmp);
+                });
+
+                // Save PNG on separate thread so display is never delayed
+                saveExec.execute(() -> {
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
+                        finalBmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                        Log.i(TAG, "PNG cache saved: " + pngCache.getName());
+                    } catch (Exception e) {
+                        Log.w(TAG, "PNG cache save failed: " + e.getMessage());
+                        pngCache.delete();
+                    }
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Pdfium render failed: " + e.getMessage());
