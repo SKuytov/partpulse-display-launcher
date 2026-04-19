@@ -17,36 +17,36 @@
         android:background="#0b0d13"
         android:visibility="gone">
 
-        <!-- WITH IMAGE layout: vertical split — image top 45%, text bottom 55% -->
+        <!-- WITH IMAGE: side-by-side — image left, text right -->
         <LinearLayout
             android:id="@+id/notifWithImageLayout"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:visibility="gone">
 
-            <!-- Top image strip — 45% of screen height -->
+            <!-- Left: image fills full height, centerCrop -->
             <ImageView
                 android:id="@+id/notifImage"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="45"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
                 android:scaleType="centerCrop"
                 android:contentDescription="@null" />
 
-            <!-- Bottom text panel — 55% of screen height -->
+            <!-- Right: dark text panel, vertically centered -->
             <LinearLayout
                 android:id="@+id/notifTextPanel"
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="55"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
                 android:orientation="vertical"
                 android:background="#0b0d13"
-                android:paddingStart="64dp"
-                android:paddingEnd="64dp"
-                android:paddingTop="28dp"
-                android:paddingBottom="28dp"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:paddingStart="48dp"
+                android:paddingEnd="48dp"
+                android:paddingTop="32dp"
+                android:paddingBottom="32dp">
 
                 <TextView
                     android:id="@+id/notifTag"
@@ -57,32 +57,32 @@
                     android:textStyle="bold"
                     android:textAllCaps="true"
                     android:letterSpacing="0.12"
-                    android:paddingBottom="10dp" />
+                    android:paddingBottom="14dp" />
 
                 <TextView
                     android:id="@+id/notifTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="#f0f4ff"
-                    android:textSize="44sp"
+                    android:textSize="48sp"
                     android:textStyle="bold"
-                    android:paddingBottom="12dp" />
+                    android:paddingBottom="16dp" />
 
                 <TextView
                     android:id="@+id/notifBody"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="#c0c8e8"
-                    android:textSize="20sp"
-                    android:lineSpacingExtra="4dp"
-                    android:paddingBottom="14dp" />
+                    android:textSize="22sp"
+                    android:lineSpacingExtra="6dp"
+                    android:paddingBottom="18dp" />
 
                 <TextView
                     android:id="@+id/notifDate"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="#6b7280"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
 
             </LinearLayout>
 
