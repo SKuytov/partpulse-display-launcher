@@ -350,6 +350,10 @@ public class NativeDisplayActivity extends Activity {
             return;
         }
 
+        final File pngCache = new File(
+            pdfFile.getParent(),
+            pdfFile.getName().replaceAll("\\.pdf$", "_rendered.png"));
+
         final DisplayMetrics realDm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
         final int screenW = realDm.widthPixels;
@@ -357,6 +361,26 @@ public class NativeDisplayActivity extends Activity {
         final Context appContext = getApplicationContext();
 
         renderExec.execute(() -> {
+            if (pngCache.exists()) {
+                try {
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                    final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
+                    if (cached != null) {
+                        Log.i(TAG, "PNG cache hit: " + pngCache.getName());
+                        main.post(() -> {
+                            pdfCanvas.setVisibility(View.VISIBLE);
+                            pdfCanvas.setBitmap(cached);
+                        });
+                        return;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "PNG cache decode failed, re-rendering: " + e.getMessage());
+                    pngCache.delete();
+                }
+            }
+
+            Log.i(TAG, "PNG cache miss — rendering via Pdfium: " + pdfFile.getName());
             PdfiumCore pdfiumCore = null;
             PdfDocument pdfDocument = null;
             try {
@@ -387,6 +411,17 @@ public class NativeDisplayActivity extends Activity {
                 }
                 if (bmp == null) return;
                 final Bitmap finalBmp = bmp;
+
+                final Bitmap bmpToSave = finalBmp;
+                renderExec.execute(() -> {
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
+                        bmpToSave.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                        Log.i(TAG, "PNG cache saved: " + pngCache.getName());
+                    } catch (Exception e) {
+                        Log.w(TAG, "PNG cache save failed: " + e.getMessage());
+                        pngCache.delete();
+                    }
+                });
 
                 main.post(() -> {
                     pdfCanvas.setVisibility(View.VISIBLE);

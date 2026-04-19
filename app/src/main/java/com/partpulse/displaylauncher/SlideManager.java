@@ -108,6 +108,18 @@ public class SlideManager {
                 }
 
                 File cacheDir = context.getCacheDir();
+
+                if (!hash.equals(stateHash)) {
+                    File[] pngFiles = cacheDir.listFiles(
+                        (dir, name) -> name.endsWith("_rendered.png"));
+                    if (pngFiles != null) {
+                        for (File f : pngFiles) {
+                            f.delete();
+                            Log.i(TAG, "Invalidated PNG cache: " + f.getName());
+                        }
+                    }
+                }
+
                 for (Slide s : parsed) {
                     if (s.url == null || s.url.isEmpty()) continue;
                     try {
