@@ -10,80 +10,141 @@
         android:layout_height="match_parent"
         android:background="#111111" />
 
-    <LinearLayout
+    <!-- Notification overlay: image fills screen, text bar pinned to bottom -->
+    <FrameLayout
         android:id="@+id/notificationOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="horizontal"
         android:background="#0b0d13"
         android:visibility="gone">
 
+        <!-- Image: fills entire slide, edge to edge -->
+        <ImageView
+            android:id="@+id/notifImage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:contentDescription="@null" />
+
+        <!-- Gradient scrim so text is readable over any image -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="260dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/notif_scrim" />
+
+        <!-- Text panel: pinned to bottom, overlaid on image -->
         <LinearLayout
             android:id="@+id/notifTextPanel"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
             android:orientation="vertical"
-            android:background="#1a1d27"
-            android:padding="48dp">
+            android:paddingStart="56dp"
+            android:paddingEnd="56dp"
+            android:paddingTop="24dp"
+            android:paddingBottom="32dp">
 
             <TextView
                 android:id="@+id/notifTag"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#3b82f6"
-                android:textSize="11sp"
+                android:textColor="#60a5fa"
+                android:textSize="12sp"
                 android:textStyle="bold"
                 android:textAllCaps="true"
                 android:letterSpacing="0.15"
-                android:paddingBottom="24dp" />
+                android:paddingBottom="10dp" />
 
             <TextView
                 android:id="@+id/notifTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="#e8eaf0"
-                android:textSize="36sp"
+                android:textColor="#f0f4ff"
+                android:textSize="38sp"
                 android:textStyle="bold"
-                android:paddingBottom="16dp" />
+                android:shadowColor="#CC000000"
+                android:shadowDx="0"
+                android:shadowDy="2"
+                android:shadowRadius="8"
+                android:paddingBottom="10dp" />
 
             <TextView
                 android:id="@+id/notifBody"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="#9ca3c8"
-                android:textSize="18sp"
-                android:lineSpacingExtra="4dp" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
+                android:textColor="#c8cfe8"
+                android:textSize="20sp"
+                android:lineSpacingExtra="4dp"
+                android:shadowColor="#CC000000"
+                android:shadowDx="0"
+                android:shadowDy="1"
+                android:shadowRadius="6"
+                android:paddingBottom="12dp" />
 
             <TextView
                 android:id="@+id/notifDate"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#5a6080"
-                android:textSize="12sp" />
+                android:textColor="#7b82a8"
+                android:textSize="13sp" />
+
         </LinearLayout>
 
-        <FrameLayout
+        <!-- No-image fallback: full dark panel (shown when notifImage has no bitmap) -->
+        <LinearLayout
             android:id="@+id/notifImagePanel"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_weight="0.82"
-            android:background="#0f1117">
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="#1a1d27"
+            android:paddingStart="80dp"
+            android:paddingEnd="80dp"
+            android:visibility="gone">
 
-            <ImageView
-                android:id="@+id/notifImage"
+            <TextView
+                android:id="@+id/notifTagNoImg"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#60a5fa"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textAllCaps="true"
+                android:letterSpacing="0.15"
+                android:paddingBottom="20dp" />
+
+            <TextView
+                android:id="@+id/notifTitleNoImg"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitCenter"
-                android:padding="20dp"
-                android:contentDescription="@null" />
-        </FrameLayout>
-    </LinearLayout>
+                android:layout_height="wrap_content"
+                android:textColor="#f0f4ff"
+                android:textSize="52sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:paddingBottom="20dp" />
+
+            <TextView
+                android:id="@+id/notifBodyNoImg"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#9ca3c8"
+                android:textSize="26sp"
+                android:gravity="center"
+                android:lineSpacingExtra="6dp"
+                android:paddingBottom="32dp" />
+
+            <TextView
+                android:id="@+id/notifDateNoImg"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:textColor="#5a6080"
+                android:textSize="14sp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
     <!-- Label pill: top-left floating -->
     <TextView
