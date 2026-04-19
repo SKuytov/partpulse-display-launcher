@@ -52,6 +52,7 @@ public class NativeDisplayActivity extends Activity {
 
     private PdfPageView pdfCanvas;
     private FrameLayout notificationOverlay;
+    private LinearLayout notifWithImageLayout;
     private LinearLayout notifTextPanel;
     private LinearLayout notifImagePanel;
     private TextView notifTag, notifTitle, notifBody, notifDate;
@@ -150,6 +151,7 @@ public class NativeDisplayActivity extends Activity {
 
         pdfCanvas           = findViewById(R.id.pdfCanvas);
         notificationOverlay = findViewById(R.id.notificationOverlay);
+        notifWithImageLayout = findViewById(R.id.notifWithImageLayout);
         notifTextPanel      = findViewById(R.id.notifTextPanel);
         notifImagePanel     = findViewById(R.id.notifImagePanel);
         notifTag            = findViewById(R.id.notifTag);
@@ -274,8 +276,8 @@ public class NativeDisplayActivity extends Activity {
         updateDots(index);
 
         if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
-            pdfCanvas.clearBitmap();
             pdfCanvas.setVisibility(View.GONE);
+            pdfCanvas.clearBitmap();
             notificationOverlay.setVisibility(View.VISIBLE);
 
             String tagText = (s.lblClass != null && !s.lblClass.isEmpty())
@@ -283,50 +285,28 @@ public class NativeDisplayActivity extends Activity {
 
             boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
                     && new File(s.localPath).exists();
-            if (hasImage) {
-                notifImage.setVisibility(View.VISIBLE);
-                notifTextPanel.setVisibility(View.VISIBLE);
-                notifImagePanel.setVisibility(View.GONE);
 
-                final String path = s.localPath;
-                final int screenW, screenH;
-                {
-                    android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
-                    getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-                    screenW = dm.widthPixels;
-                    screenH = dm.heightPixels;
-                }
-                renderExec.execute(() -> {
-                    BitmapFactory.Options opts = new BitmapFactory.Options();
-                    opts.inJustDecodeBounds = true;
-                    BitmapFactory.decodeFile(path, opts);
-                    opts.inSampleSize = 1;
-                    if (opts.outWidth > 0 && opts.outHeight > 0) {
-                        int sw = opts.outWidth / screenW;
-                        int sh = opts.outHeight / screenH;
-                        int s2 = Math.min(sw, sh);
-                        if (s2 > 1) opts.inSampleSize = s2;
-                    }
-                    opts.inJustDecodeBounds = false;
-                    opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-                    final Bitmap bmp = BitmapFactory.decodeFile(path, opts);
-                    main.post(() -> {
-                        if (bmp != null) {
-                            notifImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                            notifImage.setImageBitmap(bmp);
-                            notifImage.setLayoutParams(new android.widget.FrameLayout.LayoutParams(
-                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
-                        }
-                    });
-                });
+            if (hasImage) {
+                notifWithImageLayout.setVisibility(View.VISIBLE);
+                notifImagePanel.setVisibility(View.GONE);
 
                 notifTag.setText(tagText);
                 notifTitle.setText(s.title != null ? s.title : "");
                 notifBody.setText(s.body != null ? s.body : "");
                 notifDate.setText(s.date != null ? s.date : "");
-                notifTextPanel.bringToFront();
-                notifTextPanel.setVisibility(View.VISIBLE);
+
+                final String imgPath = s.localPath;
+                renderExec.execute(() -> {
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                    final Bitmap bmp = BitmapFactory.decodeFile(imgPath, opts);
+                    main.post(() -> {
+                        if (bmp != null) {
+                            notifImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                            notifImage.setImageBitmap(bmp);
+                        }
+                    });
+                });
             } else {
                 showNotifNoImage(s, tagText);
             }
@@ -343,8 +323,7 @@ public class NativeDisplayActivity extends Activity {
     }
 
     private void showNotifNoImage(Slide s, String tagText) {
-        notifImage.setVisibility(View.GONE);
-        notifTextPanel.setVisibility(View.GONE);
+        notifWithImageLayout.setVisibility(View.GONE);
         notifImagePanel.setVisibility(View.VISIBLE);
 
         notifTagNoImg.setText(tagText);
