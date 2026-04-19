@@ -353,7 +353,7 @@ public class NativeDisplayActivity extends Activity {
 
         final File pngCache = new File(
             pdfFile.getParent(),
-            pdfFile.getName().replaceAll("\\.pdf$", "_rendered.png"));
+            pdfFile.getName().replaceAll("\\.pdf$", "_rendered.jpg"));
 
         final DisplayMetrics realDm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
@@ -368,7 +368,7 @@ public class NativeDisplayActivity extends Activity {
                     opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
                     final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
                     if (cached != null) {
-                        Log.i(TAG, "PNG cache hit: " + pngCache.getName());
+                        Log.i(TAG, "JPEG cache hit: " + pngCache.getName());
                         main.post(() -> {
                             pdfCanvas.setVisibility(View.VISIBLE);
                             pdfCanvas.setBitmap(cached);
@@ -376,12 +376,12 @@ public class NativeDisplayActivity extends Activity {
                         return;
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "PNG cache decode failed, re-rendering: " + e.getMessage());
+                    Log.w(TAG, "JPEG cache decode failed, re-rendering: " + e.getMessage());
                     pngCache.delete();
                 }
             }
 
-            Log.i(TAG, "PNG cache miss — rendering via Pdfium: " + pdfFile.getName());
+            Log.i(TAG, "JPEG cache miss — rendering via Pdfium: " + pdfFile.getName());
             PdfiumCore pdfiumCore = null;
             PdfDocument pdfDocument = null;
             try {
@@ -422,10 +422,10 @@ public class NativeDisplayActivity extends Activity {
                 // Save PNG on separate thread so display is never delayed
                 saveExec.execute(() -> {
                     try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
-                        finalBmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                        Log.i(TAG, "PNG cache saved: " + pngCache.getName());
+                        finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos); // JPEG 95 = visually lossless, 10x smaller
+                        Log.i(TAG, "JPEG cache saved: " + pngCache.getName());
                     } catch (Exception e) {
-                        Log.w(TAG, "PNG cache save failed: " + e.getMessage());
+                        Log.w(TAG, "JPEG cache save failed: " + e.getMessage());
                         pngCache.delete();
                     }
                 });
