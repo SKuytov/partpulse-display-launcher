@@ -111,7 +111,7 @@ public class SlideManager {
 
                 if (!hash.equals(stateHash)) {
                     File[] pngFiles = cacheDir.listFiles(
-                        (dir, name) -> name.endsWith("_rendered.png"));
+                        (dir, name) -> name.endsWith("_rendered.jpg") || name.endsWith("_rendered.png"));
                     if (pngFiles != null) {
                         for (File f : pngFiles) {
                             f.delete();
