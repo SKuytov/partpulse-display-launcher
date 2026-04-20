@@ -31,7 +31,8 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:scaleType="centerCrop"
+                android:scaleType="fitCenter"
+                android:background="#0b0d13"
                 android:contentDescription="@null" />
 
             <!-- Right: dark text panel, vertically centered -->
@@ -42,8 +43,8 @@
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:background="#0b0d13"
-                android:gravity="center_vertical"
-                android:paddingStart="48dp"
+                android:gravity="center_vertical|start"
+                android:paddingStart="56dp"
                 android:paddingEnd="48dp"
                 android:paddingTop="32dp"
                 android:paddingBottom="32dp">
@@ -57,7 +58,7 @@
                     android:textStyle="bold"
                     android:textAllCaps="true"
                     android:letterSpacing="0.12"
-                    android:paddingBottom="14dp" />
+                    android:paddingBottom="8dp" />
 
                 <TextView
                     android:id="@+id/notifTitle"
@@ -66,7 +67,7 @@
                     android:textColor="#f0f4ff"
                     android:textSize="48sp"
                     android:textStyle="bold"
-                    android:paddingBottom="16dp" />
+                    android:paddingBottom="12dp" />
 
                 <TextView
                     android:id="@+id/notifBody"
@@ -75,7 +76,7 @@
                     android:textColor="#c0c8e8"
                     android:textSize="22sp"
                     android:lineSpacingExtra="6dp"
-                    android:paddingBottom="18dp" />
+                    android:paddingBottom="14dp" />
 
                 <TextView
                     android:id="@+id/notifDate"

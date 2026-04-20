@@ -290,8 +290,28 @@ public class NativeDisplayActivity extends Activity {
             pdfCanvas.clearBitmap();
             notificationOverlay.setVisibility(View.VISIBLE);
 
-            String tagText = (s.lblClass != null && !s.lblClass.isEmpty())
-                    ? s.lblClass.toUpperCase() : "ИЗВЕСТИЕ";
+            String tagText;
+            if (s.lblClass != null && !s.lblClass.isEmpty()) {
+                switch (s.lblClass.toLowerCase().replace("-", "").replace("_", "")) {
+                    case "lblnotif":
+                    case "notif":
+                    case "notification":
+                        tagText = "СЪОБЩЕНИЕ"; break;
+                    case "lblwarn":
+                    case "warn":
+                    case "warning":
+                        tagText = "ВНИМАНИЕ"; break;
+                    case "lblinfo":
+                    case "info":
+                        tagText = "ИНФОРМАЦИЯ"; break;
+                    default:
+                        tagText = s.lblClass.replace("lbl-", "").replace("lbl_", "")
+                                            .replace("-", " ").replace("_", " ")
+                                            .toUpperCase();
+                }
+            } else {
+                tagText = "СЪОБЩЕНИЕ";
+            }
 
             boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
                     && new File(s.localPath).exists();
@@ -312,7 +332,7 @@ public class NativeDisplayActivity extends Activity {
                     final Bitmap bmp = BitmapFactory.decodeFile(imgPath, opts);
                     main.post(() -> {
                         if (bmp != null) {
-                            notifImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                            notifImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
                             notifImage.setImageBitmap(bmp);
                         }
                     });
