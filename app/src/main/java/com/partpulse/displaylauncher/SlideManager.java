@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -57,7 +58,11 @@ public class SlideManager {
     private String stateHash = "";
 
     public SlideManager() {
-        this.http = new OkHttpClient();
+        this.http = new OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .build();
         this.executor = Executors.newSingleThreadExecutor();
         this.main = new Handler(Looper.getMainLooper());
     }

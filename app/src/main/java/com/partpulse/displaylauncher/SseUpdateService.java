@@ -20,6 +20,9 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
@@ -27,35 +30,37 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
-/**
- * Background service that holds an open SSE connection to the schedule server.
- *
- * Endpoint: events.php?hash=<lastKnownHash>
- * Event:    "update" with JSON data {"hash": "<newHash>"}
- * Behavior: broadcasts ACTION_SLIDES_UPDATED only when the hash changes.
- */
 public class SseUpdateService extends Service {
 
     private static final String TAG = "SseUpdateService";
 
-    // New action (hash-driven slide refresh)
     public static final String ACTION_SLIDES_UPDATED =
         "com.partpulse.displaylauncher.SLIDES_UPDATED";
-    // Kept for compatibility with older code paths
     public static final String ACTION_CONTENT_UPDATED =
         "com.partpulse.displaylauncher.CONTENT_UPDATED";
 
     private static final String CHANNEL_ID = "pp_sse_channel";
     private static final int    NOTIF_ID   = 1001;
 
-    private static final long BACKOFF_MIN = 5_000L;
-    private static final long BACKOFF_MAX = 60_000L;
+    private static final long BACKOFF_MIN       = 5_000L;
+    private static final long BACKOFF_MAX       = 60_000L;
+    private static final long WATCHDOG_INTERVAL = 90_000L;   // check every 90s
+    private static final long WATCHDOG_TIMEOUT  = 5 * 60_000L; // reconnect if silent 5min
+    private static final long POLL_INTERVAL     = 3 * 60_000L; // poll every 3min
+
+    private static final Pattern HASH_PATTERN =
+        Pattern.compile("STATE_HASH\\s*=\\s*['\"]([0-9a-fA-F]{32})['\"]");
+    private static final Pattern HASH_FALLBACK =
+        Pattern.compile("['\"]([0-9a-fA-F]{32})['\"]");
 
     private OkHttpClient httpClient;
     private volatile boolean running = true;
-    private Call activeCall;
+    private volatile Call activeCall;
+    private volatile Thread sseThread;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wakeLock;
+
+    private final AtomicLong lastEventTime = new AtomicLong(System.currentTimeMillis());
 
     @Override
     public void onCreate() {
@@ -83,9 +88,17 @@ public class SseUpdateService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         running = true;
-        Thread thread = new Thread(this::sseLoop, "SSE-Listener");
-        thread.setDaemon(true);
-        thread.start();
+        if (sseThread == null || !sseThread.isAlive()) {
+            sseThread = new Thread(this::sseLoop, "SSE-Listener");
+            sseThread.setDaemon(true);
+            sseThread.start();
+        }
+        Thread watchdog = new Thread(this::watchdogLoop, "SSE-Watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+        Thread poller = new Thread(this::pollLoop, "Hash-Poller");
+        poller.setDaemon(true);
+        poller.start();
         return START_STICKY;
     }
 
@@ -130,6 +143,7 @@ public class SseUpdateService extends Service {
                         continue;
                     }
                     backoff = BACKOFF_MIN;
+                    lastEventTime.set(System.currentTimeMillis());
                     Log.d(TAG, "SSE connected");
 
                     ResponseBody body = response.body();
@@ -142,8 +156,8 @@ public class SseUpdateService extends Service {
                     StringBuilder dataBuf = new StringBuilder();
 
                     while (running && (line = reader.readLine()) != null) {
+                        lastEventTime.set(System.currentTimeMillis());
                         if (line.isEmpty()) {
-                            // dispatch buffered event
                             if (dataBuf.length() > 0) {
                                 handleEvent(currentEvent, dataBuf.toString(), prefs);
                             }
@@ -155,7 +169,6 @@ public class SseUpdateService extends Service {
                             if (dataBuf.length() > 0) dataBuf.append('\n');
                             dataBuf.append(line.substring(5).trim());
                         }
-                        // ignore id:, retry:, comments (":")
                     }
                 }
             } catch (IOException e) {
@@ -169,6 +182,76 @@ public class SseUpdateService extends Service {
         Log.d(TAG, "SSE loop ended");
     }
 
+    // ─── Watchdog loop ──────────────────────────────────────────────────────
+    // If no SSE data received within WATCHDOG_TIMEOUT, cancels the active call
+    // so sseLoop catches IOException and reconnects.
+
+    private void watchdogLoop() {
+        while (running) {
+            sleep(WATCHDOG_INTERVAL);
+            if (!running) break;
+            long silence = System.currentTimeMillis() - lastEventTime.get();
+            if (silence > WATCHDOG_TIMEOUT) {
+                Log.w(TAG, "SSE watchdog: " + (silence / 1000) + "s silence — forcing reconnect");
+                lastEventTime.set(System.currentTimeMillis());
+                Call call = activeCall;
+                if (call != null) call.cancel();
+            }
+        }
+    }
+
+    // ─── Polling fallback ───────────────────────────────────────────────────
+    // Runs independently of SSE. Fetches index.php, compares STATE_HASH, and
+    // broadcasts an update when it changes.
+
+    private void pollLoop() {
+        AppPrefs prefs = new AppPrefs(this);
+        OkHttpClient pollClient = new OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build();
+
+        while (running) {
+            sleep(POLL_INTERVAL);
+            if (!running) break;
+            try {
+                String indexUrl = prefs.getUrl();
+                Request req = new Request.Builder()
+                    .url(indexUrl)
+                    .addHeader("Cache-Control", "no-cache")
+                    .build();
+                try (Response resp = pollClient.newCall(req).execute()) {
+                    if (!resp.isSuccessful()) continue;
+                    ResponseBody body = resp.body();
+                    if (body == null) continue;
+                    String html = body.string();
+                    String newHash = parseHash(html);
+                    if (newHash == null || newHash.isEmpty()) continue;
+                    String knownHash = prefs.getLastHash();
+                    if (!newHash.equals(knownHash)) {
+                        Log.i(TAG, "Poll detected hash change: " + knownHash + " → " + newHash);
+                        prefs.setLastHash(newHash);
+                        broadcastUpdate();
+                    } else {
+                        Log.v(TAG, "Poll: hash unchanged (" + newHash + ")");
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Poll failed: " + e.getMessage());
+            }
+        }
+    }
+
+    private String parseHash(String html) {
+        Matcher m = HASH_PATTERN.matcher(html);
+        if (m.find()) return m.group(1);
+        Matcher f = HASH_FALLBACK.matcher(html);
+        if (f.find()) return f.group(1);
+        return null;
+    }
+
+    // ─── event handling ─────────────────────────────────────────────────────
+
     private void handleEvent(String event, String data, AppPrefs prefs) {
         String eventName = event == null ? "message" : event;
         Log.v(TAG, "SSE event=" + eventName + " data=" + data);
@@ -179,9 +262,7 @@ public class SseUpdateService extends Service {
         try {
             JSONObject j = new JSONObject(data);
             newHash = j.optString("hash", null);
-        } catch (Exception ignore) {
-            // not JSON — fall through to broadcast as a legacy trigger
-        }
+        } catch (Exception ignore) {}
 
         String currentHash = prefs.getLastHash();
         if (newHash != null && !newHash.isEmpty()) {
@@ -192,14 +273,10 @@ public class SseUpdateService extends Service {
                 Log.v(TAG, "Hash unchanged — skipping broadcast");
             }
         } else {
-            // Legacy: no hash payload, just trigger a refresh
             broadcastUpdate();
         }
     }
 
-    /**
-     * Builds: https://host/grafik/events.php?hash=<currentHash>
-     */
     private String buildSseUrl(String currentHash) {
         String displayUrl = new AppPrefs(this).getUrl();
         try {
@@ -228,7 +305,6 @@ public class SseUpdateService extends Service {
             Intent intent = new Intent(ACTION_SLIDES_UPDATED);
             intent.setPackage(getPackageName());
             sendBroadcast(intent);
-            // Back-compat: also send the old action for any listeners that still use it
             Intent legacy = new Intent(ACTION_CONTENT_UPDATED);
             legacy.setPackage(getPackageName());
             sendBroadcast(legacy);
@@ -239,32 +315,25 @@ public class SseUpdateService extends Service {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
     }
 
-    // ─── foreground notification ───────────────────────────────────────────
-
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "PartPulse Live Sync",
-                NotificationManager.IMPORTANCE_MIN
-            );
+                CHANNEL_ID, "PartPulse Live Sync", NotificationManager.IMPORTANCE_MIN);
             channel.setDescription("Monitors schedule updates in the background");
             channel.setShowBadge(false);
-            NotificationManager nm =
-                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
             if (nm != null) nm.createNotificationChannel(channel);
         }
     }
 
     private Notification buildNotification() {
-        androidx.core.app.NotificationCompat.Builder builder =
-            new androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("PartPulse Display")
-                .setContentText("Monitoring for schedule updates…")
-                .setSmallIcon(android.R.drawable.ic_menu_view)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_MIN)
-                .setOngoing(true)
-                .setSilent(true);
-        return builder.build();
+        return new androidx.core.app.NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("PartPulse Display")
+            .setContentText("Monitoring for schedule updates…")
+            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_MIN)
+            .setOngoing(true)
+            .setSilent(true)
+            .build();
     }
 }

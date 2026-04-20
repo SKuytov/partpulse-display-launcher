@@ -83,6 +83,14 @@ public class NativeDisplayActivity extends Activity {
 
     private PowerManager.WakeLock screenWakeLock;
     private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
+    private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
+
+    private final Runnable serviceCheckRunnable = new Runnable() {
+        @Override public void run() {
+            startSseService();
+            main.postDelayed(this, SERVICE_CHECK_INTERVAL_MS);
+        }
+    };
 
     private final Runnable keepAliveRunnable = new Runnable() {
         @Override public void run() {
@@ -194,12 +202,14 @@ public class NativeDisplayActivity extends Activity {
             Log.w(TAG, "WakeLock acquire failed: " + e.getMessage());
         }
         main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
+        main.postDelayed(serviceCheckRunnable, SERVICE_CHECK_INTERVAL_MS);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         main.removeCallbacks(keepAliveRunnable);
+        main.removeCallbacks(serviceCheckRunnable);
         try {
             if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
         } catch (Exception e) {
