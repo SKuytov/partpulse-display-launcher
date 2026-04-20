@@ -322,6 +322,7 @@ public class NativeDisplayActivity extends Activity {
 
                 notifTag.setText(tagText);
                 notifTitle.setText(s.title != null ? s.title : "");
+                autoFitTitle(notifTitle, 48f, 22f);
                 notifBody.setText(s.body != null ? s.body : "");
                 notifDate.setText(s.date != null ? s.date : "");
 
@@ -358,8 +359,46 @@ public class NativeDisplayActivity extends Activity {
 
         notifTagNoImg.setText(tagText);
         notifTitleNoImg.setText(s.title != null ? s.title : "");
+        autoFitTitle(notifTitleNoImg, 52f, 24f);
         notifBodyNoImg.setText(s.body != null ? s.body : "");
         notifDateNoImg.setText(s.date != null ? s.date : "");
+    }
+
+    /**
+     * Shrinks textView's text size until the text fits within maxLines=2 lines,
+     * using the view's current measured width. Tries sizes from maxSp down to minSp.
+     */
+    private void autoFitTitle(final TextView tv, final float maxSp, final float minSp) {
+        tv.post(() -> {
+            int width = tv.getWidth() - tv.getPaddingLeft() - tv.getPaddingRight();
+            if (width <= 0) return;
+
+            float scaledDensity = getResources().getDisplayMetrics().scaledDensity;
+
+            android.text.TextPaint paint = new android.text.TextPaint(tv.getPaint());
+            float sp = maxSp;
+            while (sp >= minSp) {
+                paint.setTextSize(sp * scaledDensity);
+                android.text.StaticLayout sl = android.text.StaticLayout.Builder
+                    .obtain(tv.getText(), 0, tv.getText().length(), paint, width)
+                    .setMaxLines(2)
+                    .setEllipsize(android.text.TextUtils.TruncateAt.END)
+                    .build();
+                if (sl.getLineCount() <= 2 && !isTruncated(sl)) {
+                    break;
+                }
+                sp -= 1f;
+            }
+            float finalSp = Math.max(sp, minSp);
+            tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, finalSp);
+        });
+    }
+
+    private boolean isTruncated(android.text.StaticLayout sl) {
+        int lineCount = sl.getLineCount();
+        if (lineCount == 0) return false;
+        int lastLine = lineCount - 1;
+        return sl.getEllipsisCount(lastLine) > 0;
     }
 
     private void applyLabelChip(Slide s) {

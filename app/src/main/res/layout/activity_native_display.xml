@@ -18,7 +18,7 @@
         android:background="#0b0d13"
         android:visibility="gone">
 
-        <!-- WITH IMAGE: side-by-side — image left, text right -->
+        <!-- WITH IMAGE: side-by-side — text left, image right -->
         <LinearLayout
             android:id="@+id/notifWithImageLayout"
             android:layout_width="match_parent"
@@ -26,17 +26,7 @@
             android:orientation="horizontal"
             android:visibility="gone">
 
-            <!-- Left: image fills full height, centerCrop -->
-            <ImageView
-                android:id="@+id/notifImage"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:scaleType="fitCenter"
-                android:background="#0b0d13"
-                android:contentDescription="@null" />
-
-            <!-- Right: dark text panel, vertically centered -->
+            <!-- Left: dark text panel, vertically centered -->
             <LinearLayout
                 android:id="@+id/notifTextPanel"
                 android:layout_width="0dp"
@@ -70,11 +60,7 @@
                     android:textStyle="bold"
                     android:maxLines="2"
                     android:ellipsize="end"
-                    android:paddingBottom="12dp"
-                    app:autoSizeTextType="uniform"
-                    app:autoSizeMinTextSize="22sp"
-                    app:autoSizeMaxTextSize="48sp"
-                    app:autoSizeStepGranularity="1sp" />
+                    android:paddingBottom="12dp" />
 
                 <TextView
                     android:id="@+id/notifBody"
@@ -98,6 +84,16 @@
                     android:textSize="14sp" />
 
             </LinearLayout>
+
+            <!-- Right: image fills full height, fitCenter -->
+            <ImageView
+                android:id="@+id/notifImage"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:scaleType="fitCenter"
+                android:background="#0b0d13"
+                android:contentDescription="@null" />
 
         </LinearLayout>
 
@@ -134,11 +130,7 @@
                 android:gravity="center"
                 android:maxLines="2"
                 android:ellipsize="end"
-                android:paddingBottom="20dp"
-                app:autoSizeTextType="uniform"
-                app:autoSizeMinTextSize="24sp"
-                app:autoSizeMaxTextSize="52sp"
-                app:autoSizeStepGranularity="1sp" />
+                android:paddingBottom="20dp" />
 
             <TextView
                 android:id="@+id/notifBodyNoImg"
