@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#111111">
@@ -46,8 +47,8 @@
                 android:gravity="center_vertical|start"
                 android:paddingStart="56dp"
                 android:paddingEnd="48dp"
-                android:paddingTop="32dp"
-                android:paddingBottom="32dp">
+                android:paddingTop="24dp"
+                android:paddingBottom="24dp">
 
                 <TextView
                     android:id="@+id/notifTag"
@@ -67,15 +68,26 @@
                     android:textColor="#f0f4ff"
                     android:textSize="48sp"
                     android:textStyle="bold"
-                    android:paddingBottom="12dp" />
+                    android:maxLines="2"
+                    android:ellipsize="end"
+                    android:paddingBottom="12dp"
+                    app:autoSizeTextType="uniform"
+                    app:autoSizeMinTextSize="22sp"
+                    app:autoSizeMaxTextSize="48sp"
+                    app:autoSizeStepGranularity="1sp" />
 
                 <TextView
                     android:id="@+id/notifBody"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textColor="#c0c8e8"
-                    android:textSize="22sp"
-                    android:lineSpacingExtra="6dp"
+                    android:textSize="20sp"
+                    android:lineSpacingExtra="5dp"
+                    android:lineSpacingMultiplier="1.15"
+                    android:maxLines="4"
+                    android:ellipsize="end"
+                    android:hyphenationFrequency="normal"
+                    android:breakStrategy="high_quality"
                     android:paddingBottom="14dp" />
 
                 <TextView
@@ -120,16 +132,27 @@
                 android:textSize="52sp"
                 android:textStyle="bold"
                 android:gravity="center"
-                android:paddingBottom="20dp" />
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:paddingBottom="20dp"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="24sp"
+                app:autoSizeMaxTextSize="52sp"
+                app:autoSizeStepGranularity="1sp" />
 
             <TextView
                 android:id="@+id/notifBodyNoImg"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="#9ca3c8"
-                android:textSize="26sp"
+                android:textSize="24sp"
                 android:gravity="center"
-                android:lineSpacingExtra="6dp"
+                android:lineSpacingExtra="5dp"
+                android:lineSpacingMultiplier="1.15"
+                android:maxLines="4"
+                android:ellipsize="end"
+                android:hyphenationFrequency="normal"
+                android:breakStrategy="high_quality"
                 android:paddingBottom="32dp" />
 
             <TextView
