@@ -22,6 +22,9 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 import android.view.WindowManager;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -41,8 +44,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Main launcher activity — renders PDF slides natively via PdfRenderer
- * and notification overlays. Replaces WebView-based DisplayActivity.
+ * Main launcher activity — renders PDF slides natively via PdfRenderer,
+ * notification overlays, and full-screen WebView slides.
  */
 public class NativeDisplayActivity extends Activity {
 
@@ -51,6 +54,7 @@ public class NativeDisplayActivity extends Activity {
         "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
     private PdfPageView pdfCanvas;
+    private WebView webSlideView;
     private FrameLayout notificationOverlay;
     private LinearLayout notifWithImageLayout;
     private LinearLayout notifTextPanel;
@@ -70,10 +74,8 @@ public class NativeDisplayActivity extends Activity {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
-    private final ExecutorService saveExec   = Executors.newSingleThreadExecutor(); // dedicated PNG save thread
+    private final ExecutorService saveExec   = Executors.newSingleThreadExecutor();
 
-    // In-memory bitmap cache: key = localPath, value = rendered Bitmap
-    // Use 1/4 of available heap — keeps rendered bitmaps across slide cycles
     private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
             (int)(Runtime.getRuntime().maxMemory() / 4)) {
         @Override protected int sizeOf(String key, Bitmap value) {
@@ -95,14 +97,13 @@ public class NativeDisplayActivity extends Activity {
     private final Runnable keepAliveRunnable = new Runnable() {
         @Override public void run() {
             try {
-                // userActivity() is @hide — use reflection so it compiles against public SDK
                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                 if (pm != null) {
                     try {
                         java.lang.reflect.Method ua = pm.getClass()
                             .getMethod("userActivity", long.class, boolean.class);
                         ua.invoke(pm, SystemClock.uptimeMillis(), false);
-                    } catch (Exception ignored) { /* not available on this firmware */ }
+                    } catch (Exception ignored) {}
                 }
             } catch (Exception e) {
                 Log.w(TAG, "userActivity failed: " + e.getMessage());
@@ -158,6 +159,7 @@ public class NativeDisplayActivity extends Activity {
         setContentView(R.layout.activity_native_display);
 
         pdfCanvas           = findViewById(R.id.pdfCanvas);
+        webSlideView        = findViewById(R.id.webSlideView);
         notificationOverlay = findViewById(R.id.notificationOverlay);
         notifWithImageLayout = findViewById(R.id.notifWithImageLayout);
         notifTextPanel      = findViewById(R.id.notifTextPanel);
@@ -176,6 +178,23 @@ public class NativeDisplayActivity extends Activity {
         dotRow              = findViewById(R.id.dotRow);
         progressBar         = findViewById(R.id.progressBar);
         loadingSpinner      = findViewById(R.id.loadingSpinner);
+
+        // Configure WebView for full-screen webpage slides
+        WebSettings ws = webSlideView.getSettings();
+        ws.setJavaScriptEnabled(true);
+        ws.setDomStorageEnabled(true);
+        ws.setLoadWithOverviewMode(true);
+        ws.setUseWideViewPort(true);
+        ws.setBuiltInZoomControls(false);
+        ws.setDisplayZoomControls(false);
+        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+        webSlideView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                // Keep all navigation inside the WebView (no external browser)
+                return false;
+            }
+        });
 
         prefs = new AppPrefs(this);
         slideManager = new SlideManager();
@@ -203,6 +222,8 @@ public class NativeDisplayActivity extends Activity {
         }
         main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
         main.postDelayed(serviceCheckRunnable, SERVICE_CHECK_INTERVAL_MS);
+        // Resume WebView if it's currently shown
+        webSlideView.onResume();
     }
 
     @Override
@@ -215,6 +236,7 @@ public class NativeDisplayActivity extends Activity {
         } catch (Exception e) {
             Log.w(TAG, "WakeLock release failed: " + e.getMessage());
         }
+        webSlideView.onPause();
     }
 
     @Override
@@ -225,6 +247,8 @@ public class NativeDisplayActivity extends Activity {
         try {
             if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
         } catch (Exception ignored) {}
+        webSlideView.stopLoading();
+        webSlideView.destroy();
         renderExec.shutdownNow();
     }
 
@@ -245,7 +269,7 @@ public class NativeDisplayActivity extends Activity {
             @Override public void onSlidesReady(List<Slide> newSlides, String hash) {
                 slides.clear();
                 slides.addAll(newSlides);
-                bitmapCache.evictAll(); // clear stale bitmaps from previous schedule
+                bitmapCache.evictAll();
                 loadingSpinner.setVisibility(View.GONE);
                 if (slides.isEmpty()) {
                     Log.w(TAG, "No slides to display");
@@ -285,9 +309,25 @@ public class NativeDisplayActivity extends Activity {
         applyLabelChip(s);
         updateDots(index);
 
-        if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
+        if (Slide.TYPE_WEBPAGE.equals(s.type)) {
+            // ── Webpage slide ──
             pdfCanvas.setVisibility(View.GONE);
             pdfCanvas.clearBitmap();
+            notificationOverlay.setVisibility(View.GONE);
+            webSlideView.setVisibility(View.VISIBLE);
+            // Only reload if the URL has changed (avoid flicker on re-cycle)
+            String current = webSlideView.getUrl();
+            if (current == null || !current.equals(s.url)) {
+                webSlideView.loadUrl(s.url);
+            } else {
+                webSlideView.reload();
+            }
+
+        } else if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
+            // ── Notification slide ──
+            pdfCanvas.setVisibility(View.GONE);
+            pdfCanvas.clearBitmap();
+            webSlideView.setVisibility(View.GONE);
             notificationOverlay.setVisibility(View.VISIBLE);
 
             String tagText;
@@ -296,21 +336,21 @@ public class NativeDisplayActivity extends Activity {
                     case "lblnotif":
                     case "notif":
                     case "notification":
-                        tagText = "СЪОБЩЕНИЕ"; break;
+                        tagText = "\u0421\u042a\u041e\u0411\u0429\u0415\u041d\u0418\u0415"; break;
                     case "lblwarn":
                     case "warn":
                     case "warning":
-                        tagText = "ВНИМАНИЕ"; break;
+                        tagText = "\u0412\u041d\u0418\u041c\u0410\u041d\u0418\u0415"; break;
                     case "lblinfo":
                     case "info":
-                        tagText = "ИНФОРМАЦИЯ"; break;
+                        tagText = "\u0418\u041d\u0424\u041e\u0420\u041c\u0410\u0426\u0418\u042f"; break;
                     default:
                         tagText = s.lblClass.replace("lbl-", "").replace("lbl_", "")
                                             .replace("-", " ").replace("_", " ")
                                             .toUpperCase();
                 }
             } else {
-                tagText = "СЪОБЩЕНИЕ";
+                tagText = "\u0421\u042a\u041e\u0411\u0429\u0415\u041d\u0418\u0415";
             }
 
             boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
@@ -342,14 +382,14 @@ public class NativeDisplayActivity extends Activity {
                 showNotifNoImage(s, tagText);
             }
         } else {
+            // ── PDF slide (default) ──
             notificationOverlay.setVisibility(View.GONE);
+            webSlideView.setVisibility(View.GONE);
             pdfCanvas.setVisibility(View.VISIBLE);
             renderPdf(s);
         }
 
         animateProgress(Math.max(1, s.duration) * 1000);
-
-        // Prefetch the next slide in background so it's ready when auto-advance fires
         prefetchNextSlide(index);
     }
 
@@ -364,10 +404,6 @@ public class NativeDisplayActivity extends Activity {
         notifDateNoImg.setText(s.date != null ? s.date : "");
     }
 
-    /**
-     * Shrinks textView's text size until the text fits within maxLines=2 lines,
-     * using the view's current measured width. Tries sizes from maxSp down to minSp.
-     */
     private void autoFitTitle(final TextView tv, final float maxSp, final float minSp) {
         tv.post(() -> {
             int width = tv.getWidth() - tv.getPaddingLeft() - tv.getPaddingRight();
@@ -467,7 +503,6 @@ public class NativeDisplayActivity extends Activity {
         final int screenH = realDm.heightPixels;
         final Context appContext = getApplicationContext();
 
-        // Memory cache hit — instant, no disk I/O
         Bitmap memCached = bitmapCache.get(pdfFile.getAbsolutePath());
         if (memCached != null) {
             final Bitmap mc = memCached;
@@ -486,7 +521,7 @@ public class NativeDisplayActivity extends Activity {
                     final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
                     if (cached != null) {
                         Log.i(TAG, "JPEG cache hit: " + pngCache.getName());
-                        bitmapCache.put(pdfFile.getAbsolutePath(), cached); // store in memory too
+                        bitmapCache.put(pdfFile.getAbsolutePath(), cached);
                         main.post(() -> {
                             pdfCanvas.setVisibility(View.VISIBLE);
                             pdfCanvas.setBitmap(cached);
@@ -531,19 +566,16 @@ public class NativeDisplayActivity extends Activity {
                 if (bmp == null) return;
                 final Bitmap finalBmp = bmp;
 
-                // Store in memory cache for instant access on next slide cycle
                 bitmapCache.put(pdfFile.getAbsolutePath(), finalBmp);
 
-                // Show bitmap immediately — don't block on JPEG write
                 main.post(() -> {
                     pdfCanvas.setVisibility(View.VISIBLE);
                     pdfCanvas.setBitmap(finalBmp);
                 });
 
-                // Save PNG on separate thread so display is never delayed
                 saveExec.execute(() -> {
                     try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
-                        finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos); // JPEG 95 = visually lossless, 10x smaller
+                        finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
                         Log.i(TAG, "JPEG cache saved: " + pngCache.getName());
                     } catch (Exception e) {
                         Log.w(TAG, "JPEG cache save failed: " + e.getMessage());
@@ -561,32 +593,24 @@ public class NativeDisplayActivity extends Activity {
         });
     }
 
-    // ─── pre-render ─────────────────────────────────────────────────────────
-
-    /**
-     * Immediately start rendering the NEXT slide in background.
-     * Called after showSlide() so by the time auto-advance fires, it's already in cache.
-     */
     private void prefetchNextSlide(int currentIdx) {
         if (slides.isEmpty()) return;
         int nextIdx = (currentIdx + 1) % slides.size();
         Slide next = slides.get(nextIdx);
         if (Slide.TYPE_PDF.equals(next.type) && next.localPath != null) {
-            // Only prefetch if not already in memory cache
             if (bitmapCache.get(next.localPath) == null) {
-                renderPdf(next); // queued on renderExec, runs in background
+                renderPdf(next);
             }
         }
     }
 
-    /** Render all PDF slides in background so every slide is instant on display. */
     private void preRenderAllSlides() {
         for (int i = 0; i < slides.size(); i++) {
             final Slide s = slides.get(i);
             if ("pdf".equals(s.type) && s.localPath != null) {
                 final int idx = i;
-                if (idx == currentIndex) continue; // already rendered by showSlide
-                renderPdf(s); // queued on renderExec, runs sequentially in background
+                if (idx == currentIndex) continue;
+                renderPdf(s);
             }
         }
     }

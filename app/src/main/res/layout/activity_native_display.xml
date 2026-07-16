@@ -11,6 +11,13 @@
         android:layout_height="match_parent"
         android:background="#111111" />
 
+    <!-- Webpage slide: full-screen WebView -->
+    <WebView
+        android:id="@+id/webSlideView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <FrameLayout
         android:id="@+id/notificationOverlay"
         android:layout_width="match_parent"

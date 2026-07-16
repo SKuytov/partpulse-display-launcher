@@ -29,6 +29,7 @@ import okhttp3.ResponseBody;
 /**
  * Fetches the index.php page, parses the SLIDES array and STATE_HASH,
  * and downloads referenced PDF/image assets into the internal cache.
+ * Webpage slides (type=webpage) are NOT downloaded — the URL is passed directly.
  */
 public class SlideManager {
 
@@ -37,12 +38,10 @@ public class SlideManager {
     private static final String KEY_SLIDES_JSON = "slides_json";
     private static final String KEY_HASH = "state_hash";
 
-    // Regex patterns
     private static final Pattern SLIDES_PATTERN =
         Pattern.compile("const\\s+SLIDES\\s*=\\s*(\\[.*?\\])\\s*;", Pattern.DOTALL);
     private static final Pattern HASH_PATTERN =
         Pattern.compile("STATE_HASH\\s*=\\s*['\"]([0-9a-fA-F]{32})['\"]");
-    // Fallback: any 32-char hex in single quotes
     private static final Pattern HASH_FALLBACK =
         Pattern.compile("['\"]([0-9a-fA-F]{32})['\"]");
 
@@ -70,9 +69,6 @@ public class SlideManager {
     public List<Slide> getSlides() { return slides; }
     public String getStateHash() { return stateHash; }
 
-    /**
-     * Fetches index.php, parses slides, downloads assets, then invokes callback.
-     */
     public void refresh(final Context context, final Callback cb) {
         final AppPrefs prefs = new AppPrefs(context);
         final String indexUrl = prefs.getUrl();
@@ -102,7 +98,6 @@ public class SlideManager {
                     parsed.add(s);
                 }
 
-                // For notification slides, content is embedded in HTML divs, not JSON.
                 for (Slide s : parsed) {
                     if (!Slide.TYPE_NOTIFICATION.equals(s.type)) continue;
                     try {
@@ -126,6 +121,11 @@ public class SlideManager {
                 }
 
                 for (Slide s : parsed) {
+                    // Webpage slides: URL is used directly by WebView — skip download
+                    if (Slide.TYPE_WEBPAGE.equals(s.type)) {
+                        Log.i(TAG, "Webpage slide — skipping asset download, URL: " + s.url);
+                        continue;
+                    }
                     if (s.url == null || s.url.isEmpty()) continue;
                     try {
                         String fname = fileNameFromUrl(s.url);
@@ -141,7 +141,6 @@ public class SlideManager {
                 slides.addAll(parsed);
                 stateHash = hash;
 
-                // Cache slide list + hash
                 SharedPreferences sp = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
                 sp.edit()
                   .putString(KEY_SLIDES_JSON, arr.toString())
@@ -197,7 +196,7 @@ public class SlideManager {
                    .replace("&amp;", "&")
                    .replace("&lt;", "<")
                    .replace("&gt;", ">")
-                   .replace("&#9679;", "●")
+                   .replace("&#9679;", "\u25cf")
                    .replace("&nbsp;", " ")
                    .trim();
     }
@@ -225,7 +224,6 @@ public class SlideManager {
         return new JSONArray(m.group(1));
     }
 
-    /** Gets base dir of the index URL (e.g. https://host/grafik/). */
     private String indexUrlBase(String indexUrl) {
         try {
             URL u = new URL(indexUrl);
@@ -259,7 +257,6 @@ public class SlideManager {
         int slash = clean.lastIndexOf('/');
         String name = slash >= 0 ? clean.substring(slash + 1) : clean;
         if (name.isEmpty()) name = "asset_" + Math.abs(url.hashCode());
-        // sanitize
         return name.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 

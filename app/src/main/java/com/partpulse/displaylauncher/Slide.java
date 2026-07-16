@@ -2,11 +2,13 @@ package com.partpulse.displaylauncher;
 
 /**
  * A single slide item parsed from the server's SLIDES array.
- * Types: "pdf" (renders PDF page) or "notification" (renders overlay).
+ * Types: "pdf" (renders PDF page), "notification" (renders overlay),
+ *        "webpage" (loads a URL in a full-screen WebView).
  */
 public class Slide {
-    public static final String TYPE_PDF = "pdf";
+    public static final String TYPE_PDF          = "pdf";
     public static final String TYPE_NOTIFICATION = "notification";
+    public static final String TYPE_WEBPAGE      = "webpage";
 
     public int id;
     public String type;
