@@ -61,7 +61,7 @@ public class NativeDisplayActivity extends Activity {
     public static final String ACTION_SLIDES_UPDATED =
             "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
-    private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
+    private static final long KEEPALIVE_INTERVAL_MS = 3L * 60L * 1000L;
     private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
     private static final long APP_RESTART_INTERVAL_MS = 1L * 60L * 60L * 1000L;
 
