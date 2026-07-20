@@ -241,36 +241,79 @@ private final Runnable appRestartRunnable = new Runnable() {
     }
 
     private void configureWebSlideView() {
-        if (webSlideView == null) return;
+    if (webSlideView == null) return;
 
-        WebSettings ws = webSlideView.getSettings();
-        ws.setJavaScriptEnabled(true);
-        ws.setDomStorageEnabled(true);
-        ws.setLoadWithOverviewMode(true);
-        ws.setUseWideViewPort(true);
-        ws.setBuiltInZoomControls(false);
-        ws.setDisplayZoomControls(false);
-        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-        ws.setSupportMultipleWindows(false);
-        ws.setJavaScriptCanOpenWindowsAutomatically(false);
+    WebSettings ws = webSlideView.getSettings();
+    ws.setJavaScriptEnabled(true);
+    ws.setDomStorageEnabled(true);
+    ws.setLoadWithOverviewMode(true);
+    ws.setUseWideViewPort(true);
+    ws.setBuiltInZoomControls(false);
+    ws.setDisplayZoomControls(false);
+    ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+    ws.setSupportMultipleWindows(false);
+    ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
-        webSlideView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        webSlideView.setOnLongClickListener(v -> true);
-        webSlideView.setLongClickable(false);
-        webSlideView.setHapticFeedbackEnabled(false);
+    webSlideView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+    webSlideView.setOnLongClickListener(v -> true);
+    webSlideView.setLongClickable(false);
+    webSlideView.setHapticFeedbackEnabled(false);
 
-        webSlideView.setWebViewClient(new WebViewClientCompat() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return false;
-            }
+    webSlideView.setWebViewClient(new WebViewClientCompat() {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            return false;
+        }
 
-            @Override
-            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-                Log.e(TAG, "WebView renderer gone. didCrash=" + detail.didCrash());
-                recreateWebView();
-                return true;
-            }
+        @Override
+        public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+            Log.e(TAG, "WebView renderer gone. didCrash=" + detail.didCrash());
+            recreateWebView();
+            return true;
+        }
+    });
+
+    try {
+        webSlideView.setRendererPriorityPolicy(
+                WebView.RENDERER_PRIORITY_IMPORTANT,
+                false
+        );
+    } catch (Throwable t) {
+        Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
+    }
+
+    try {
+        WebViewCompat.setWebViewRenderProcessClient(
+                webSlideView,
+                new WebViewRenderProcessClient() {
+                    @Override
+                    public void onRenderProcessUnresponsive(
+                            WebView view,
+                            WebViewRenderProcess renderer
+                    ) {
+                        Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
+                        try {
+                            if (renderer != null) {
+                                renderer.terminate();
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                        recreateWebView();
+                    }
+
+                    @Override
+                    public void onRenderProcessResponsive(
+                            WebView view,
+                            WebViewRenderProcess renderer
+                    ) {
+                        Log.i(TAG, "WebView renderer responsive again.");
+                    }
+                }
+        );
+    } catch (Throwable t) {
+        Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
+    }
+}
         });
 
         try {
