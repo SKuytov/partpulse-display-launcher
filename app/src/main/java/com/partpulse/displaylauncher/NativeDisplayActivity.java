@@ -77,6 +77,30 @@ public class NativeDisplayActivity extends Activity {
     private AppPrefs prefs;
     private final List<Slide> slides = new ArrayList<>();
     private int currentIndex = 0;
+    
+    // Restart app every 1 hours to improve long-run stability
+private static final long APP_RESTART_INTERVAL_MS = 2L * 60L * 60L * 1000L; // 1 hours
+private final Runnable appRestartRunnable = new Runnable() {
+    @Override
+    public void run() {
+        try {
+            Log.i(TAG, "Scheduled app restart: relaunching NativeDisplayActivity");
+            Context ctx = NativeDisplayActivity.this.getApplicationContext();
+            Intent restartIntent = new Intent(ctx, NativeDisplayActivity.class);
+            restartIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            ctx.startActivity(restartIntent);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to start restart activity: " + t.getMessage());
+        }
+
+        try {
+            // Finish the current activity so the new one becomes the foreground
+            finish();
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to finish activity during restart: " + t.getMessage());
+        }
+    }
+};
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
@@ -212,6 +236,8 @@ public class NativeDisplayActivity extends Activity {
 
         loadSlides();
         startSseService();
+         // Schedule periodic self-restart to avoid long-run freezes
+        main.postDelayed(appRestartRunnable, APP_RESTART_INTERVAL_MS);
     }
 
     private void configureWebSlideView() {
@@ -287,39 +313,6 @@ try {
 } catch (Throwable t) {
     Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
 }
-
-        try {
-            WebViewCompat.setWebViewRenderProcessClient(
-                    webSlideView,
-                    new WebViewRenderProcessClient() {
-                        @Override
-                        public void onRenderProcessUnresponsive(
-                                WebView view,
-                                WebViewRenderProcess renderer
-                        ) {
-                            Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
-                            try {
-                                if (renderer != null) {
-                                    renderer.terminate();
-                                }
-                            } catch (Throwable ignored) {
-                            }
-                            recreateWebView();
-                        }
-
-                        @Override
-                        public void onRenderProcessResponsive(
-                                WebView view,
-                                WebViewRenderProcess renderer
-                        ) {
-                            Log.i(TAG, "WebView renderer responsive again.");
-                        }
-                    }
-            );
-        } catch (Throwable t) {
-            Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
-        }
-    }
 
     private void recreateWebView() {
         main.post(() -> {
