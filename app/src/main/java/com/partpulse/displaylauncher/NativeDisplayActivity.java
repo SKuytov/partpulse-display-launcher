@@ -248,10 +248,13 @@ public class NativeDisplayActivity extends Activity {
         });
 
         try {
-           WebViewCompat.setRendererPriorityPolicy(
-        webSlideView,
-        WebView.RENDERER_PRIORITY_IMPORTANT,
-        false
+    webSlideView.setRendererPriorityPolicy(
+            WebView.RENDERER_PRIORITY_IMPORTANT,
+            false
+    );
+} catch (Throwable t) {
+    Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
+}
 );
         } catch (Throwable t) {
             Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
