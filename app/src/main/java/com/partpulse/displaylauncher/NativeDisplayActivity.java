@@ -21,8 +21,8 @@ import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.LinearInterpolator;
 import android.view.WindowManager;
+import android.view.animation.LinearInterpolator;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -41,6 +41,7 @@ import com.shockwave.pdfium.PdfDocument;
 import com.shockwave.pdfium.PdfiumCore;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -59,6 +60,12 @@ public class NativeDisplayActivity extends Activity {
     public static final String ACTION_SLIDES_UPDATED =
             "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
+    private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
+    private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
+
+    // Adjust if needed: 1h is safe for recovery-first testing.
+    private static final long APP_RESTART_INTERVAL_MS = 1L * 60L * 60L * 1000L;
+
     private PdfPageView pdfCanvas;
     private WebView webSlideView;
     private FrameLayout notificationOverlay;
@@ -73,86 +80,98 @@ public class NativeDisplayActivity extends Activity {
     private View progressBar;
     private ProgressBar loadingSpinner;
 
-private SlideManager slideManager;
-private AppPrefs prefs;
-private final List<Slide> slides = new ArrayList<>();
-private int currentIndex = 0;
+    private SlideManager slideManager;
+    private AppPrefs prefs;
+    private final List<Slide> slides = new ArrayList<>();
+    private int currentIndex = 0;
 
-private final Handler main = new Handler(Looper.getMainLooper());
-private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
-private final ExecutorService saveExec = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
+    private final ExecutorService saveExec = Executors.newSingleThreadExecutor();
 
-private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
-        (int) (Runtime.getRuntime().maxMemory() / 4)
-) {
-    @Override
-    protected int sizeOf(String key, Bitmap value) {
-        return value.getByteCount();
-    }
-};
-
-private PowerManager.WakeLock screenWakeLock;
-private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
-private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
-
-private final Runnable serviceCheckRunnable = new Runnable() {
-    @Override
-    public void run() {
-        startSseService();
-        main.postDelayed(this, SERVICE_CHECK_INTERVAL_MS);
-    }
-};
-
-private final Runnable keepAliveRunnable = new Runnable() {
-    @Override
-    public void run() {
-        try {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                try {
-                    java.lang.reflect.Method ua = pm.getClass()
-                            .getMethod("userActivity", long.class, boolean.class);
-                    ua.invoke(pm, SystemClock.uptimeMillis(), false);
-                } catch (Exception ignored) {
+    private final LruCache<String, Bitmap> bitmapCache =
+            new LruCache<String, Bitmap>((int) (Runtime.getRuntime().maxMemory() / 4)) {
+                @Override
+                protected int sizeOf(String key, Bitmap value) {
+                    return value.getByteCount();
                 }
+            };
+
+    private PowerManager.WakeLock screenWakeLock;
+
+    private final Runnable serviceCheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            startSseService();
+            main.postDelayed(this, SERVICE_CHECK_INTERVAL_MS);
+        }
+    };
+
+    private final Runnable keepAliveRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    try {
+                        java.lang.reflect.Method ua =
+                                pm.getClass().getMethod("userActivity", long.class, boolean.class);
+                        ua.invoke(pm, SystemClock.uptimeMillis(), false);
+                    } catch (Exception ignored) {
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "userActivity failed: " + e.getMessage());
             }
-        } catch (Exception e) {
-            Log.w(TAG, "userActivity failed: " + e.getMessage());
+
+            runOnUiThread(() ->
+                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
+
+            main.postDelayed(this, KEEPALIVE_INTERVAL_MS);
         }
+    };
 
-        runOnUiThread(() ->
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
-
-        main.postDelayed(this, KEEPALIVE_INTERVAL_MS);
-    }
-};
-
-private final Runnable advanceRunnable = new Runnable() {
-    @Override
-    public void run() {
-        if (!slides.isEmpty()) {
-            currentIndex = (currentIndex + 1) % slides.size();
-            showSlide(currentIndex);
+    private final Runnable advanceRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!slides.isEmpty()) {
+                currentIndex = (currentIndex + 1) % slides.size();
+                showSlide(currentIndex);
+            }
+            scheduleAdvance();
         }
-        scheduleAdvance();
-    }
-};
+    };
 
-private final Runnable clockRunnable = new Runnable() {
-    @Override
-    public void run() {
-        updateClock();
-        main.postDelayed(this, 1_000L);
-    }
-};
+    private final Runnable clockRunnable = new Runnable() {
+        @Override
+        public void run() {
+            updateClock();
+            main.postDelayed(this, 1_000L);
+        }
+    };
 
-private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
-    @Override
-    public void onReceive(Context ctx, Intent intent) {
-        Log.i(TAG, "Slides update broadcast received, refreshing...");
-        loadSlides();
-    }
-};
+    private final Runnable appRestartRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                Log.i(TAG, "Scheduled app restart triggered");
+                Intent restartIntent = new Intent(NativeDisplayActivity.this, NativeDisplayActivity.class);
+                restartIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                startActivity(restartIntent);
+                finish();
+            } catch (Exception e) {
+                Log.e(TAG, "Scheduled app restart failed", e);
+            }
+        }
+    };
+
+    private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            Log.i(TAG, "Slides update broadcast received, refreshing...");
+            loadSlides();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -212,168 +231,124 @@ private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
 
         loadSlides();
         startSseService();
-         // Schedule periodic self-restart to avoid long-run freezes
         main.postDelayed(appRestartRunnable, APP_RESTART_INTERVAL_MS);
     }
 
-private void configureWebSlideView() {
-    if (webSlideView == null) return;
+    private void configureWebSlideView() {
+        if (webSlideView == null) return;
 
-    WebSettings ws = webSlideView.getSettings();
-    ws.setJavaScriptEnabled(true);
-    ws.setDomStorageEnabled(true);
-    ws.setLoadWithOverviewMode(true);
-    ws.setUseWideViewPort(true);
-    ws.setBuiltInZoomControls(false);
-    ws.setDisplayZoomControls(false);
-    ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-    ws.setSupportMultipleWindows(false);
-    ws.setJavaScriptCanOpenWindowsAutomatically(false);
+        WebSettings ws = webSlideView.getSettings();
+        ws.setJavaScriptEnabled(true);
+        ws.setDomStorageEnabled(true);
+        ws.setLoadWithOverviewMode(true);
+        ws.setUseWideViewPort(true);
+        ws.setBuiltInZoomControls(false);
+        ws.setDisplayZoomControls(false);
+        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+        ws.setSupportMultipleWindows(false);
+        ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
-    // For iiyama signage stability, start with software layer.
-    webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-    webSlideView.setOnLongClickListener(v -> true);
-    webSlideView.setLongClickable(false);
-    webSlideView.setHapticFeedbackEnabled(false);
+        // For signage stability, software layer is safer on problematic panels.
+        webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        webSlideView.setOnLongClickListener(v -> true);
+        webSlideView.setLongClickable(false);
+        webSlideView.setHapticFeedbackEnabled(false);
 
-    webSlideView.setWebViewClient(new WebViewClientCompat() {
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            return false;
-        }
+        webSlideView.setWebViewClient(new WebViewClientCompat() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return false;
+            }
 
-        @Override
-        public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-            Log.e(TAG, "WebView renderer gone. didCrash=" + detail.didCrash());
-            recreateWebView();
-            return true;
-        }
-    });
-
-    try {
-        webSlideView.setRendererPriorityPolicy(
-                WebView.RENDERER_PRIORITY_IMPORTANT,
-                false
-        );
-    } catch (Throwable t) {
-        Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
-    }
-
-    try {
-        WebViewCompat.setWebViewRenderProcessClient(
-                webSlideView,
-                new WebViewRenderProcessClient() {
-                    @Override
-                    public void onRenderProcessUnresponsive(
-                            WebView view,
-                            WebViewRenderProcess renderer
-                    ) {
-                        Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
-                        try {
-                            if (renderer != null) {
-                                renderer.terminate();
-                            }
-                        } catch (Throwable ignored) {
-                        }
-                        recreateWebView();
-                    }
-
-                    @Override
-                    public void onRenderProcessResponsive(
-                            WebView view,
-                            WebViewRenderProcess renderer
-                    ) {
-                        Log.i(TAG, "WebView renderer responsive again.");
-                    }
-                }
-        );
-    } catch (Throwable t) {
-        Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
-    }
-}
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                Log.e(TAG, "WebView renderer gone. didCrash=" + detail.didCrash());
+                recreateWebView();
+                return true;
+            }
         });
 
         try {
-    webSlideView.setRendererPriorityPolicy(
-            WebView.RENDERER_PRIORITY_IMPORTANT,
-            false
-    );
-} catch (Throwable t) {
-    Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
-}
+            webSlideView.setRendererPriorityPolicy(
+                    WebView.RENDERER_PRIORITY_IMPORTANT,
+                    false
+            );
+        } catch (Throwable t) {
+            Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
+        }
 
-try {
-    WebViewCompat.setWebViewRenderProcessClient(
-            webSlideView,
-            new WebViewRenderProcessClient() {
-                @Override
-                public void onRenderProcessUnresponsive(
-                        WebView view,
-                        WebViewRenderProcess renderer
-                ) {
-                    Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
-                    try {
-                        if (renderer != null) {
-                            renderer.terminate();
+        try {
+            WebViewCompat.setWebViewRenderProcessClient(
+                    webSlideView,
+                    new WebViewRenderProcessClient() {
+                        @Override
+                        public void onRenderProcessUnresponsive(
+                                WebView view,
+                                WebViewRenderProcess renderer
+                        ) {
+                            Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
+                            try {
+                                if (renderer != null) {
+                                    renderer.terminate();
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                            recreateWebView();
                         }
-                    } catch (Throwable ignored) {
-                    }
-                    recreateWebView();
-                }
 
-                @Override
-                public void onRenderProcessResponsive(
-                        WebView view,
-                        WebViewRenderProcess renderer
-                ) {
-                    Log.i(TAG, "WebView renderer responsive again.");
-                }
-            }
-    );
-} catch (Throwable t) {
-    Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
-}
+                        @Override
+                        public void onRenderProcessResponsive(
+                                WebView view,
+                                WebViewRenderProcess renderer
+                        ) {
+                            Log.i(TAG, "WebView renderer responsive again.");
+                        }
+                    }
+            );
+        } catch (Throwable t) {
+            Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
+        }
+    }
 
     private void recreateWebView() {
         main.post(() -> {
             try {
-                if (webSlideView != null) {
-                    try {
-                        webSlideView.stopLoading();
-                        webSlideView.loadUrl("about:blank");
-                        webSlideView.clearHistory();
-                        webSlideView.clearCache(true);
-                        webSlideView.onPause();
-                    } catch (Throwable ignored) {
-                    }
+                if (webSlideView == null) return;
 
-                    ViewGroup parent = (ViewGroup) webSlideView.getParent();
-                    if (parent != null) {
-                        parent.removeView(webSlideView);
-
-                        WebView newWebView = new WebView(this);
-                        newWebView.setId(R.id.webSlideView);
-                        newWebView.setVisibility(View.GONE);
-
-                        int index = parent.indexOfChild(pdfCanvas);
-                        if (index < 0) {
-                            index = 0;
-                        }
-
-                        parent.addView(
-                                newWebView,
-                                index + 1,
-                                new FrameLayout.LayoutParams(
-                                        FrameLayout.LayoutParams.MATCH_PARENT,
-                                        FrameLayout.LayoutParams.MATCH_PARENT
-                                )
-                        );
-
-                        webSlideView.destroy();
-                        webSlideView = newWebView;
-                        configureWebSlideView();
-                    }
+                try {
+                    webSlideView.stopLoading();
+                    webSlideView.loadUrl("about:blank");
+                    webSlideView.clearHistory();
+                    webSlideView.clearCache(true);
+                    webSlideView.onPause();
+                    webSlideView.pauseTimers();
+                } catch (Throwable ignored) {
                 }
+
+                ViewGroup parent = (ViewGroup) webSlideView.getParent();
+                if (parent == null) return;
+
+                int insertIndex = parent.indexOfChild(webSlideView);
+
+                parent.removeView(webSlideView);
+
+                try {
+                    webSlideView.destroy();
+                } catch (Throwable ignored) {
+                }
+
+                WebView newWebView = new WebView(this);
+                newWebView.setId(R.id.webSlideView);
+                newWebView.setVisibility(View.GONE);
+
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                );
+                parent.addView(newWebView, insertIndex >= 0 ? insertIndex : 0, lp);
+
+                webSlideView = newWebView;
+                configureWebSlideView();
             } catch (Exception e) {
                 Log.e(TAG, "Failed to recreate WebView", e);
             }
@@ -383,6 +358,7 @@ try {
     @Override
     protected void onResume() {
         super.onResume();
+
         try {
             if (screenWakeLock != null && !screenWakeLock.isHeld()) {
                 screenWakeLock.acquire();
@@ -396,8 +372,8 @@ try {
 
         if (webSlideView != null) {
             try {
-               webSlideView.onResume();
-               webSlideView.resumeTimers();
+                webSlideView.onResume();
+                webSlideView.resumeTimers();
             } catch (Throwable ignored) {
             }
         }
@@ -406,6 +382,7 @@ try {
     @Override
     protected void onPause() {
         super.onPause();
+
         main.removeCallbacks(keepAliveRunnable);
         main.removeCallbacks(serviceCheckRunnable);
 
@@ -429,6 +406,7 @@ try {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
         main.removeCallbacksAndMessages(null);
 
         try {
@@ -450,6 +428,7 @@ try {
                 webSlideView.clearHistory();
                 webSlideView.clearCache(true);
                 webSlideView.onPause();
+                webSlideView.pauseTimers();
                 webSlideView.destroy();
             } catch (Exception ignored) {
             }
@@ -514,6 +493,7 @@ try {
 
     private void showSlide(int index) {
         if (index < 0 || index >= slides.size()) return;
+
         final Slide s = slides.get(index);
 
         applyLabelChip(s);
@@ -531,6 +511,8 @@ try {
                     webSlideView.loadUrl("about:blank");
                     webSlideView.clearHistory();
                     webSlideView.clearCache(false);
+                    webSlideView.resumeTimers();
+                    webSlideView.onResume();
                     webSlideView.loadUrl(s.url);
                 } catch (Exception e) {
                     Log.e(TAG, "Failed loading webpage slide: " + s.url, e);
@@ -541,6 +523,15 @@ try {
             pdfCanvas.setVisibility(View.GONE);
             pdfCanvas.clearBitmap();
             webSlideView.setVisibility(View.GONE);
+
+            try {
+                webSlideView.stopLoading();
+                webSlideView.loadUrl("about:blank");
+                webSlideView.onPause();
+                webSlideView.pauseTimers();
+            } catch (Exception ignored) {
+            }
+
             notificationOverlay.setVisibility(View.VISIBLE);
 
             String tagText;
@@ -561,16 +552,19 @@ try {
                         tagText = "ИНФОРМАЦИЯ";
                         break;
                     default:
-                        tagText = s.lblClass.replace("lbl-", "").replace("lbl_", "")
-                                .replace("-", " ").replace("_", " ")
-                                .toUpperCase();
+                        tagText = s.lblClass.replace("lbl-", "")
+                                .replace("lbl_", "")
+                                .replace("-", " ")
+                                .replace("_", " ")
+                                .toUpperCase(Locale.getDefault());
                         break;
                 }
             } else {
                 tagText = "СЪОБЩЕНИЕ";
             }
 
-            boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
+            boolean hasImage = s.localPath != null
+                    && !s.localPath.isEmpty()
                     && new File(s.localPath).exists();
 
             if (hasImage) {
@@ -588,6 +582,7 @@ try {
                     BitmapFactory.Options opts = new BitmapFactory.Options();
                     opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
                     final Bitmap bmp = BitmapFactory.decodeFile(imgPath, opts);
+
                     main.post(() -> {
                         if (bmp != null) {
                             notifImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -601,6 +596,15 @@ try {
         } else {
             notificationOverlay.setVisibility(View.GONE);
             webSlideView.setVisibility(View.GONE);
+
+            try {
+                webSlideView.stopLoading();
+                webSlideView.loadUrl("about:blank");
+                webSlideView.onPause();
+                webSlideView.pauseTimers();
+            } catch (Exception ignored) {
+            }
+
             pdfCanvas.setVisibility(View.VISIBLE);
             renderPdf(s);
         }
@@ -823,7 +827,7 @@ try {
                 });
 
                 saveExec.execute(() -> {
-                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(jpgCache)) {
+                    try (FileOutputStream fos = new FileOutputStream(jpgCache)) {
                         finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
                         Log.i(TAG, "JPEG cache saved: " + jpgCache.getName());
                     } catch (Exception e) {
@@ -832,7 +836,7 @@ try {
                     }
                 });
             } catch (Exception e) {
-                Log.e(TAG, "Pdfium render failed: " + e.getMessage());
+                Log.e(TAG, "Pdfium render failed: " + e.getMessage(), e);
             } finally {
                 try {
                     if (pdfDocument != null && pdfiumCore != null) {
