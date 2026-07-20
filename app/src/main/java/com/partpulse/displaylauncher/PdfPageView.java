@@ -27,9 +27,9 @@ public class PdfPageView extends View {
     public PdfPageView(Context context, AttributeSet attrs) {
         super(context, attrs);
         paint = new Paint();
-        paint.setFilterBitmap(true);     // 2x bitmap is downscaled — bilinear is sharp here
-        paint.setAntiAlias(true);
-        paint.setDither(true);
+        paint.setFilterBitmap(false);     // 2x bitmap is downscaled — bilinear is sharp here
+        paint.setAntiAlias(false);
+        paint.setDither(false);
         setLayerType(LAYER_TYPE_SOFTWARE, null);
     }
 
