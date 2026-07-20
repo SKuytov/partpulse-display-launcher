@@ -20,23 +20,25 @@ import android.util.Log;
 import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
 import android.view.WindowManager;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
-import androidx.webkit.WebViewCompat;
-import androidx.webkit.WebViewClientCompat;
-import androidx.webkit.WebViewRenderProcess;
-import androidx.webkit.WebViewRenderProcessClient;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import com.shockwave.pdfium.PdfiumCore;
+import androidx.webkit.WebViewClientCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewRenderProcess;
+import androidx.webkit.WebViewRenderProcessClient;
+
 import com.shockwave.pdfium.PdfDocument;
+import com.shockwave.pdfium.PdfiumCore;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -48,14 +50,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Main launcher activity — renders PDF slides natively via PdfRenderer,
+ * Main launcher activity — renders PDF slides natively via Pdfium,
  * notification overlays, and full-screen WebView slides.
  */
 public class NativeDisplayActivity extends Activity {
 
     private static final String TAG = "NativeDisplay";
     public static final String ACTION_SLIDES_UPDATED =
-        "com.partpulse.displaylauncher.SLIDES_UPDATED";
+            "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
     private PdfPageView pdfCanvas;
     private WebView webSlideView;
@@ -78,11 +80,13 @@ public class NativeDisplayActivity extends Activity {
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
-    private final ExecutorService saveExec   = Executors.newSingleThreadExecutor();
+    private final ExecutorService saveExec = Executors.newSingleThreadExecutor();
 
     private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
-            (int)(Runtime.getRuntime().maxMemory() / 4)) {
-        @Override protected int sizeOf(String key, Bitmap value) {
+            (int) (Runtime.getRuntime().maxMemory() / 4)
+    ) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
             return value.getByteCount();
         }
     };
@@ -92,34 +96,40 @@ public class NativeDisplayActivity extends Activity {
     private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
 
     private final Runnable serviceCheckRunnable = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             startSseService();
             main.postDelayed(this, SERVICE_CHECK_INTERVAL_MS);
         }
     };
 
     private final Runnable keepAliveRunnable = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             try {
                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                 if (pm != null) {
                     try {
                         java.lang.reflect.Method ua = pm.getClass()
-                            .getMethod("userActivity", long.class, boolean.class);
+                                .getMethod("userActivity", long.class, boolean.class);
                         ua.invoke(pm, SystemClock.uptimeMillis(), false);
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                    }
                 }
             } catch (Exception e) {
                 Log.w(TAG, "userActivity failed: " + e.getMessage());
             }
+
             runOnUiThread(() ->
-                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
-            main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
+                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
+
+            main.postDelayed(this, KEEPALIVE_INTERVAL_MS);
         }
     };
 
     private final Runnable advanceRunnable = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             if (!slides.isEmpty()) {
                 currentIndex = (currentIndex + 1) % slides.size();
                 showSlide(currentIndex);
@@ -129,84 +139,23 @@ public class NativeDisplayActivity extends Activity {
     };
 
     private final Runnable clockRunnable = new Runnable() {
-        @Override public void run() {
+        @Override
+        public void run() {
             updateClock();
             main.postDelayed(this, 1_000L);
         }
     };
 
     private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context ctx, Intent intent) {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
             Log.i(TAG, "Slides update broadcast received, refreshing...");
             loadSlides();
         }
     };
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) private void configureWebSlideView() {
-    WebSettings ws = webSlideView.getSettings();
-    ws.setJavaScriptEnabled(true);
-    ws.setDomStorageEnabled(true);
-    ws.setLoadWithOverviewMode(true);
-    ws.setUseWideViewPort(true);
-    ws.setBuiltInZoomControls(false);
-    ws.setDisplayZoomControls(false);
-    ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-    ws.setSupportMultipleWindows(false);
-    ws.setJavaScriptCanOpenWindowsAutomatically(false);
-
-    // Use software rendering to avoid GPU/driver freezes on signage devices
-    webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-
-    // Disable long-press/context menu to avoid edge-case interactions
-    webSlideView.setOnLongClickListener(v -> true);
-    webSlideView.setLongClickable(false);
-
-    WebViewClientCompat client = new WebViewClientCompat() {
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            // Keep navigation inside the WebView
-            return false;
-        }
-
-        @Override
-        public boolean onRenderProcessGone(
-                WebView view,
-                android.webkit.RenderProcessGoneDetail detail
-        ) {
-            // Renderer crashed or was killed: recreate WebView safely
-            recreateWebView();
-            return true;
-        }
-    };
-    webSlideView.setWebViewClient(client);
-
-    WebViewRenderProcess renderer = WebViewCompat.getRenderer(webSlideView);
-    if (renderer != null) {
-        WebViewRenderProcessClient rpc = new WebViewRenderProcessClient() {
-            @Override
-            public void onRenderProcessUnresponsive(WebView view,
-                                                    WebViewRenderProcess proc) {
-                WebViewRenderProcess r = WebViewCompat.getRenderer(webSlideView);
-                if (r != null) r.terminate(); // force restart
-                recreateWebView();
-            }
-
-            @Override
-            public void onRenderProcessResponsive(WebView view,
-                                                  WebViewRenderProcess proc) {
-                // Renderer recovered; nothing extra to do
-            }
-        };
-        WebViewCompat.setRenderProcessClient(webSlideView, rpc);
-    }
-
-    WebViewCompat.setRendererPriorityPolicy(
-            webSlideView,
-            WebViewCompat.RENDERER_PRIORITY_IMPORTANT,
-            false
-    );
-} {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -214,8 +163,9 @@ public class NativeDisplayActivity extends Activity {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
                 screenWakeLock = pm.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE,
-                    "PartPulse:ScreenKeepOn");
+                        PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE,
+                        "PartPulse:ScreenKeepOn"
+                );
                 screenWakeLock.setReferenceCounted(false);
             }
         } catch (Exception e) {
@@ -225,44 +175,29 @@ public class NativeDisplayActivity extends Activity {
         setFullscreen();
         setContentView(R.layout.activity_native_display);
 
-       // Configure WebView for full-screen webpage slides
-configureWebSlideView();
-        private void recreateWebView() {
-    try {
-        webSlideView.stopLoading();
-        webSlideView.loadUrl("about:blank");
-        webSlideView.clearHistory();
-        webSlideView.clearCache(true);
-        webSlideView.onPause();
-        webSlideView.destroy();
-    } catch (Exception ignored) {}
+        pdfCanvas = findViewById(R.id.pdfCanvas);
+        webSlideView = findViewById(R.id.webSlideView);
+        notificationOverlay = findViewById(R.id.notificationOverlay);
+        notifWithImageLayout = findViewById(R.id.notifWithImageLayout);
+        notifTextPanel = findViewById(R.id.notifTextPanel);
+        notifImagePanel = findViewById(R.id.notifImagePanel);
+        notifTag = findViewById(R.id.notifTag);
+        notifTitle = findViewById(R.id.notifTitle);
+        notifBody = findViewById(R.id.notifBody);
+        notifDate = findViewById(R.id.notifDate);
+        notifImage = findViewById(R.id.notifImage);
+        notifTagNoImg = findViewById(R.id.notifTagNoImg);
+        notifTitleNoImg = findViewById(R.id.notifTitleNoImg);
+        notifBodyNoImg = findViewById(R.id.notifBodyNoImg);
+        notifDateNoImg = findViewById(R.id.notifDateNoImg);
+        hudLabel = findViewById(R.id.hudLabel);
+        hudClock = findViewById(R.id.hudClock);
+        dotRow = findViewById(R.id.dotRow);
+        progressBar = findViewById(R.id.progressBar);
+        loadingSpinner = findViewById(R.id.loadingSpinner);
 
-    // Remove old view from parent
-    View parentView = (View) webSlideView.getParent();
-    FrameLayout parent = null;
-    if (parentView instanceof FrameLayout) {
-        parent = (FrameLayout) parentView;
-        parent.removeView(webSlideView);
-    }
+        configureWebSlideView();
 
-    // Create new WebView instance
-    webSlideView = new WebView(this);
-    webSlideView.setId(R.id.webSlideView);
-    webSlideView.setVisibility(View.GONE);
-
-    if (parent != null) {
-        parent.addView(
-                webSlideView,
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                )
-        );
-    }
-
-    // Reconfigure WebView
-    configureWebSlideView();
-}
         prefs = new AppPrefs(this);
         slideManager = new SlideManager();
 
@@ -279,107 +214,241 @@ configureWebSlideView();
         startSseService();
     }
 
-    @Override
-protected void onResume() {
-    super.onResume();
-    try {
-        if (screenWakeLock != null && !screenWakeLock.isHeld()) screenWakeLock.acquire();
-    } catch (Exception e) {
-        Log.w(TAG, "WakeLock acquire failed: " + e.getMessage());
-    }
+    private void configureWebSlideView() {
+        if (webSlideView == null) return;
 
-    main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
-    main.postDelayed(serviceCheckRunnable, SERVICE_CHECK_INTERVAL_MS);
+        WebSettings ws = webSlideView.getSettings();
+        ws.setJavaScriptEnabled(true);
+        ws.setDomStorageEnabled(true);
+        ws.setLoadWithOverviewMode(true);
+        ws.setUseWideViewPort(true);
+        ws.setBuiltInZoomControls(false);
+        ws.setDisplayZoomControls(false);
+        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+        ws.setSupportMultipleWindows(false);
+        ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
-    if (webSlideView != null) {
-        webSlideView.onResume();
-        WebViewCompat.resumeTimers(webSlideView);
-    }
-}
+        webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        webSlideView.setOnLongClickListener(v -> true);
+        webSlideView.setLongClickable(false);
+        webSlideView.setHapticFeedbackEnabled(false);
 
-@Override
-protected void onPause() {
-    super.onPause();
-    main.removeCallbacks(keepAliveRunnable);
-    main.removeCallbacks(serviceCheckRunnable);
-    try {
-        if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
-    } catch (Exception e) {
-        Log.w(TAG, "WakeLock release failed: " + e.getMessage());
-    }
+        webSlideView.setWebViewClient(new WebViewClientCompat() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return false;
+            }
 
-    if (webSlideView != null) {
-        WebViewCompat.pauseTimers(webSlideView);
-        webSlideView.onPause();
-    }
-}
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                Log.e(TAG, "WebView renderer gone. didCrash=" + detail.didCrash());
+                recreateWebView();
+                return true;
+            }
+        });
 
-@Override
-protected void onDestroy() {
-    super.onDestroy();
-    main.removeCallbacksAndMessages(null);
-    try { unregisterReceiver(updateReceiver); } catch (Exception ignored) {}
-    try {
-        if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
-    } catch (Exception ignored) {}
-
-    if (webSlideView != null) {
         try {
-            webSlideView.stopLoading();
-            webSlideView.loadUrl("about:blank");
-            webSlideView.clearHistory();
-            webSlideView.clearCache(true);
-            WebViewCompat.pauseTimers(webSlideView);
-            webSlideView.onPause();
-            webSlideView.destroy();
-        } catch (Exception ignored) {}
+            WebViewCompat.setRendererPriorityPolicy(
+                    webSlideView,
+                    WebViewCompat.RENDERER_PRIORITY_IMPORTANT,
+                    false
+            );
+        } catch (Throwable t) {
+            Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
+        }
+
+        try {
+            WebViewCompat.setWebViewRenderProcessClient(
+                    webSlideView,
+                    new WebViewRenderProcessClient() {
+                        @Override
+                        public void onRenderProcessUnresponsive(
+                                WebView view,
+                                WebViewRenderProcess renderer
+                        ) {
+                            Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
+                            try {
+                                if (renderer != null) {
+                                    renderer.terminate();
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                            recreateWebView();
+                        }
+
+                        @Override
+                        public void onRenderProcessResponsive(
+                                WebView view,
+                                WebViewRenderProcess renderer
+                        ) {
+                            Log.i(TAG, "WebView renderer responsive again.");
+                        }
+                    }
+            );
+        } catch (Throwable t) {
+            Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
+        }
     }
 
-    renderExec.shutdownNow();
-}
+    private void recreateWebView() {
+        main.post(() -> {
+            try {
+                if (webSlideView != null) {
+                    try {
+                        webSlideView.stopLoading();
+                        webSlideView.loadUrl("about:blank");
+                        webSlideView.clearHistory();
+                        webSlideView.clearCache(true);
+                        webSlideView.onPause();
+                    } catch (Exception ignored) {
+                    }
+
+                    ViewGroup parent = (ViewGroup) webSlideView.getParent();
+                    if (parent != null) {
+                        parent.removeView(webSlideView);
+
+                        WebView newWebView = new WebView(this);
+                        newWebView.setId(R.id.webSlideView);
+                        newWebView.setVisibility(View.GONE);
+
+                        int index = parent.indexOfChild(pdfCanvas);
+                        if (index < 0) {
+                            index = 0;
+                        }
+
+                        parent.addView(
+                                newWebView,
+                                index + 1,
+                                new FrameLayout.LayoutParams(
+                                        FrameLayout.LayoutParams.MATCH_PARENT,
+                                        FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                        );
+
+                        webSlideView.destroy();
+                        webSlideView = newWebView;
+                        configureWebSlideView();
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to recreate WebView", e);
+            }
+        });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        try {
+            if (screenWakeLock != null && !screenWakeLock.isHeld()) {
+                screenWakeLock.acquire();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock acquire failed: " + e.getMessage());
+        }
+
+        main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
+        main.postDelayed(serviceCheckRunnable, SERVICE_CHECK_INTERVAL_MS);
+
+        if (webSlideView != null) {
+            try {
+                webSlideView.onResume();
+                WebView.resumeTimers();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        main.removeCallbacks(keepAliveRunnable);
+        main.removeCallbacks(serviceCheckRunnable);
+
+        try {
+            if (screenWakeLock != null && screenWakeLock.isHeld()) {
+                screenWakeLock.release();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "WakeLock release failed: " + e.getMessage());
+        }
+
+        if (webSlideView != null) {
+            try {
+                webSlideView.onPause();
+                WebView.pauseTimers();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         main.removeCallbacksAndMessages(null);
-        try { unregisterReceiver(updateReceiver); } catch (Exception ignored) {}
+
         try {
-            if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
-        } catch (Exception ignored) {}
-        webSlideView.stopLoading();
-        webSlideView.destroy();
+            unregisterReceiver(updateReceiver);
+        } catch (Exception ignored) {
+        }
+
+        try {
+            if (screenWakeLock != null && screenWakeLock.isHeld()) {
+                screenWakeLock.release();
+            }
+        } catch (Exception ignored) {
+        }
+
+        if (webSlideView != null) {
+            try {
+                webSlideView.stopLoading();
+                webSlideView.loadUrl("about:blank");
+                webSlideView.clearHistory();
+                webSlideView.clearCache(true);
+                webSlideView.onPause();
+                webSlideView.destroy();
+            } catch (Exception ignored) {
+            }
+        }
+
         renderExec.shutdownNow();
+        saveExec.shutdownNow();
     }
 
     private void setFullscreen() {
         View decor = getWindow().getDecorView();
         int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                  | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                  | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                  | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                  | View.SYSTEM_UI_FLAG_FULLSCREEN
-                  | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
         decor.setSystemUiVisibility(flags);
     }
 
     private void loadSlides() {
         loadingSpinner.setVisibility(View.VISIBLE);
         slideManager.refresh(this, new SlideManager.Callback() {
-            @Override public void onSlidesReady(List<Slide> newSlides, String hash) {
+            @Override
+            public void onSlidesReady(List<Slide> newSlides, String hash) {
                 slides.clear();
                 slides.addAll(newSlides);
                 bitmapCache.evictAll();
                 loadingSpinner.setVisibility(View.GONE);
+
                 if (slides.isEmpty()) {
                     Log.w(TAG, "No slides to display");
                     return;
                 }
+
                 buildDots();
                 currentIndex = Math.min(currentIndex, slides.size() - 1);
                 showSlide(currentIndex);
                 scheduleAdvance();
             }
-            @Override public void onError(Exception e) {
+
+            @Override
+            public void onError(Exception e) {
                 Log.e(TAG, "Failed to load slides", e);
                 loadingSpinner.setVisibility(View.GONE);
             }
@@ -398,87 +467,6 @@ protected void onDestroy() {
             Log.w(TAG, "SSE service start failed: " + e.getMessage());
         }
     }
-ws.setSupportMultipleWindows(false);
-ws.setJavaScriptCanOpenWindowsAutomatically(false);
-
-// Use software rendering on signage devices to avoid GPU driver freezes
-webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-
-// Disable long-press/context menu to avoid selection edge cases
-webSlideView.setOnLongClickListener(v -> true);
-webSlideView.setLongClickable(false);
-
-// Robust WebViewClient with renderer crash handling (replace the current WebViewClient)
-WebViewClientCompat client = new WebViewClientCompat() {
-    @Override
-    public boolean shouldOverrideUrlLoading(WebView view, String url) {
-        return false; // keep navigation inside WebView
-    }
-
-    @Override
-    public boolean onRenderProcessGone(WebView view,
-                                       android.webkit.RenderProcessGoneDetail detail) {
-        // Renderer crashed or was killed: recreate safe WebView
-        recreateWebView();
-        private void recreateWebView() {
-    try {
-        webSlideView.stopLoading();
-        webSlideView.loadUrl("about:blank");
-        webSlideView.clearHistory();
-        webSlideView.clearCache(true);
-        webSlideView.onPause();
-        webSlideView.destroy();
-    } catch (Exception ignored) {}
-
-    // Recreate and reattach WebView
-    webSlideView = new WebView(this);
-    webSlideView.setId(R.id.webSlideView);
-
-    FrameLayout root = findViewById(android.R.id.content);
-    // Or your specific root layout if activity_native_display.xml has one
-    root.addView(webSlideView,
-        new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        )
-    );
-
-    // Re-run WebView configuration (factor into initWebView() to avoid duplication)
-    configureWebSlideView();
-}
-        return true; // we handled it
-    }
-};
-webSlideView.setWebViewClient(client);
-
-// Bind a render-process client for unresponsive renderer handling (API 10+)
-WebViewRenderProcess renderer = WebViewCompat.getRenderer(webSlideView);
-if (renderer != null) {
-    WebViewRenderProcessClient rpc = new WebViewRenderProcessClient() {
-        @Override
-        public void onRenderProcessUnresponsive(WebView view,
-                                                WebViewRenderProcess proc) {
-            WebViewRenderProcess r = WebViewCompat.getRenderer(webSlideView);
-            if (r != null) r.terminate();  // force restart [web:108][web:90]
-            recreateWebView();
-        }
-
-        @Override
-        public void onRenderProcessResponsive(WebView view,
-                                              WebViewRenderProcess proc) {
-            // Renderer recovered; nothing extra needed
-        }
-    };
-    WebViewCompat.setRenderProcessClient(webSlideView, rpc);
-}
-
-// Raise renderer priority to reduce OOM kills [web:60][web:58]
-WebViewCompat.setRendererPriorityPolicy(
-        webSlideView,
-        WebViewCompat.RENDERER_PRIORITY_IMPORTANT,
-        false
-);
-    // ─── slide display ──────────────────────────────────────────────────────
 
     private void showSlide(int index) {
         if (index < 0 || index >= slides.size()) return;
@@ -488,24 +476,24 @@ WebViewCompat.setRendererPriorityPolicy(
         updateDots(index);
 
         if (Slide.TYPE_WEBPAGE.equals(s.type)) {
-    // ── Webpage slide ──
-    pdfCanvas.setVisibility(View.GONE);
-    pdfCanvas.clearBitmap();
-    notificationOverlay.setVisibility(View.GONE);
-    webSlideView.setVisibility(View.VISIBLE);
+            pdfCanvas.setVisibility(View.GONE);
+            pdfCanvas.clearBitmap();
+            notificationOverlay.setVisibility(View.GONE);
+            webSlideView.setVisibility(View.VISIBLE);
 
-    if (s.url != null && !s.url.isEmpty()) {
-        // Aggressive reset each time to avoid stale state
-        webSlideView.stopLoading();
-        webSlideView.loadUrl("about:blank");
-        webSlideView.clearHistory();
-        webSlideView.clearCache(false);
-        webSlideView.loadUrl(s.url);
-    }
-}
-
+            if (s.url != null && !s.url.isEmpty()) {
+                try {
+                    webSlideView.stopLoading();
+                    webSlideView.loadUrl("about:blank");
+                    webSlideView.clearHistory();
+                    webSlideView.clearCache(false);
+                    webSlideView.loadUrl(s.url);
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed loading webpage slide: " + s.url, e);
+                    recreateWebView();
+                }
+            }
         } else if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
-            // ── Notification slide ──
             pdfCanvas.setVisibility(View.GONE);
             pdfCanvas.clearBitmap();
             webSlideView.setVisibility(View.GONE);
@@ -517,21 +505,25 @@ WebViewCompat.setRendererPriorityPolicy(
                     case "lblnotif":
                     case "notif":
                     case "notification":
-                        tagText = "\u0421\u042a\u041e\u0411\u0429\u0415\u041d\u0418\u0415"; break;
+                        tagText = "СЪОБЩЕНИЕ";
+                        break;
                     case "lblwarn":
                     case "warn":
                     case "warning":
-                        tagText = "\u0412\u041d\u0418\u041c\u0410\u041d\u0418\u0415"; break;
+                        tagText = "ВНИМАНИЕ";
+                        break;
                     case "lblinfo":
                     case "info":
-                        tagText = "\u0418\u041d\u0424\u041e\u0420\u041c\u0410\u0426\u0418\u042f"; break;
+                        tagText = "ИНФОРМАЦИЯ";
+                        break;
                     default:
                         tagText = s.lblClass.replace("lbl-", "").replace("lbl_", "")
-                                            .replace("-", " ").replace("_", " ")
-                                            .toUpperCase();
+                                .replace("-", " ").replace("_", " ")
+                                .toUpperCase();
+                        break;
                 }
             } else {
-                tagText = "\u0421\u042a\u041e\u0411\u0429\u0415\u041d\u0418\u0415";
+                tagText = "СЪОБЩЕНИЕ";
             }
 
             boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
@@ -563,7 +555,6 @@ WebViewCompat.setRendererPriorityPolicy(
                 showNotifNoImage(s, tagText);
             }
         } else {
-            // ── PDF slide (default) ──
             notificationOverlay.setVisibility(View.GONE);
             webSlideView.setVisibility(View.GONE);
             pdfCanvas.setVisibility(View.VISIBLE);
@@ -591,21 +582,23 @@ WebViewCompat.setRendererPriorityPolicy(
             if (width <= 0) return;
 
             float scaledDensity = getResources().getDisplayMetrics().scaledDensity;
-
             android.text.TextPaint paint = new android.text.TextPaint(tv.getPaint());
+
             float sp = maxSp;
             while (sp >= minSp) {
                 paint.setTextSize(sp * scaledDensity);
                 android.text.StaticLayout sl = android.text.StaticLayout.Builder
-                    .obtain(tv.getText(), 0, tv.getText().length(), paint, width)
-                    .setMaxLines(2)
-                    .setEllipsize(android.text.TextUtils.TruncateAt.END)
-                    .build();
+                        .obtain(tv.getText(), 0, tv.getText().length(), paint, width)
+                        .setMaxLines(2)
+                        .setEllipsize(android.text.TextUtils.TruncateAt.END)
+                        .build();
+
                 if (sl.getLineCount() <= 2 && !isTruncated(sl)) {
                     break;
                 }
                 sp -= 1f;
             }
+
             float finalSp = Math.max(sp, minSp);
             tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, finalSp);
         });
@@ -630,27 +623,43 @@ WebViewCompat.setRendererPriorityPolicy(
 
     private int labelBgColor(String lblClass) {
         switch (lblClass == null ? "" : lblClass) {
-            case "lbl-blue":   return 0x5A3B82F6;
-            case "lbl-amber":  return 0x5AF59E0B;
-            case "lbl-green":  return 0x4D22C55E;
-            case "lbl-purple": return 0x4DA855F7;
-            case "lbl-red":    return 0x4DEF4444;
-            case "lbl-teal":   return 0x4D14B8A6;
-            case "lbl-notif":  return 0x4022C55E;
-            default:           return 0x663B82F6;
+            case "lbl-blue":
+                return 0x5A3B82F6;
+            case "lbl-amber":
+                return 0x5AF59E0B;
+            case "lbl-green":
+                return 0x4D22C55E;
+            case "lbl-purple":
+                return 0x4DA855F7;
+            case "lbl-red":
+                return 0x4DEF4444;
+            case "lbl-teal":
+                return 0x4D14B8A6;
+            case "lbl-notif":
+                return 0x4022C55E;
+            default:
+                return 0x663B82F6;
         }
     }
 
     private int labelTextColor(String lblClass) {
         switch (lblClass == null ? "" : lblClass) {
-            case "lbl-blue":   return 0xFFBFDBFE;
-            case "lbl-amber":  return 0xFFFDE68A;
-            case "lbl-green":  return 0xFFBBF7D0;
-            case "lbl-purple": return 0xFFE9D5FF;
-            case "lbl-red":    return 0xFFFECACA;
-            case "lbl-teal":   return 0xFF99F6E4;
-            case "lbl-notif":  return 0xFF86EFAC;
-            default:           return 0xFFFFFFFF;
+            case "lbl-blue":
+                return 0xFFBFDBFE;
+            case "lbl-amber":
+                return 0xFFFDE68A;
+            case "lbl-green":
+                return 0xFFBBF7D0;
+            case "lbl-purple":
+                return 0xFFE9D5FF;
+            case "lbl-red":
+                return 0xFFFECACA;
+            case "lbl-teal":
+                return 0xFF99F6E4;
+            case "lbl-notif":
+                return 0xFF86EFAC;
+            default:
+                return 0xFFFFFFFF;
         }
     }
 
@@ -660,23 +669,25 @@ WebViewCompat.setRendererPriorityPolicy(
         progressBar.setScaleX(0f);
         progressBar.setPivotX(0f);
         progressBar.animate()
-            .scaleX(1f)
-            .setDuration(durationMs)
-            .setInterpolator(new LinearInterpolator())
-            .start();
+                .scaleX(1f)
+                .setDuration(durationMs)
+                .setInterpolator(new LinearInterpolator())
+                .start();
     }
 
     private void renderPdf(final Slide s) {
         if (s.localPath == null) return;
+
         final File pdfFile = new File(s.localPath);
         if (!pdfFile.exists()) {
             Log.w(TAG, "PDF missing: " + s.localPath);
             return;
         }
 
-        final File pngCache = new File(
-            pdfFile.getParent(),
-            pdfFile.getName().replaceAll("\\.pdf$", "_rendered.jpg"));
+        final File jpgCache = new File(
+                pdfFile.getParent(),
+                pdfFile.getName().replaceAll("\\.pdf$", "_rendered.jpg")
+        );
 
         final DisplayMetrics realDm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(realDm);
@@ -695,13 +706,13 @@ WebViewCompat.setRendererPriorityPolicy(
         }
 
         renderExec.execute(() -> {
-            if (pngCache.exists()) {
+            if (jpgCache.exists()) {
                 try {
                     BitmapFactory.Options opts = new BitmapFactory.Options();
                     opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-                    final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
+                    final Bitmap cached = BitmapFactory.decodeFile(jpgCache.getAbsolutePath(), opts);
                     if (cached != null) {
-                        Log.i(TAG, "JPEG cache hit: " + pngCache.getName());
+                        Log.i(TAG, "JPEG cache hit: " + jpgCache.getName());
                         bitmapCache.put(pdfFile.getAbsolutePath(), cached);
                         main.post(() -> {
                             pdfCanvas.setVisibility(View.VISIBLE);
@@ -711,17 +722,21 @@ WebViewCompat.setRendererPriorityPolicy(
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "JPEG cache decode failed, re-rendering: " + e.getMessage());
-                    pngCache.delete();
+                    jpgCache.delete();
                 }
             }
 
             Log.i(TAG, "JPEG cache miss — rendering via Pdfium: " + pdfFile.getName());
+
             PdfiumCore pdfiumCore = null;
             PdfDocument pdfDocument = null;
+
             try {
                 pdfiumCore = new PdfiumCore(appContext);
                 ParcelFileDescriptor pfd = ParcelFileDescriptor.open(
-                    pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
+                        pdfFile,
+                        ParcelFileDescriptor.MODE_READ_ONLY
+                );
                 pdfDocument = pdfiumCore.newDocument(pfd);
                 pdfiumCore.openPage(pdfDocument, 0);
 
@@ -730,10 +745,15 @@ WebViewCompat.setRendererPriorityPolicy(
 
                 Bitmap bmp = null;
                 int[] scales = {4, 2, 1};
+
                 for (int mult : scales) {
-                    float scale = Math.min(screenW * mult / (float) pdfW, screenH * mult / (float) pdfH);
+                    float scale = Math.min(
+                            screenW * mult / (float) pdfW,
+                            screenH * mult / (float) pdfH
+                    );
                     int bmpW = Math.max(1, Math.round(pdfW * scale));
                     int bmpH = Math.max(1, Math.round(pdfH * scale));
+
                     try {
                         bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888);
                         pdfiumCore.renderPageBitmap(pdfDocument, bmp, 0, 0, 0, bmpW, bmpH, true);
@@ -741,9 +761,13 @@ WebViewCompat.setRendererPriorityPolicy(
                         break;
                     } catch (OutOfMemoryError oom) {
                         Log.w(TAG, "OOM at " + mult + "x, trying lower scale");
-                        if (bmp != null) { bmp.recycle(); bmp = null; }
+                        if (bmp != null) {
+                            bmp.recycle();
+                            bmp = null;
+                        }
                     }
                 }
+
                 if (bmp == null) return;
                 final Bitmap finalBmp = bmp;
 
@@ -755,21 +779,23 @@ WebViewCompat.setRendererPriorityPolicy(
                 });
 
                 saveExec.execute(() -> {
-                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(pngCache)) {
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(jpgCache)) {
                         finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                        Log.i(TAG, "JPEG cache saved: " + pngCache.getName());
+                        Log.i(TAG, "JPEG cache saved: " + jpgCache.getName());
                     } catch (Exception e) {
                         Log.w(TAG, "JPEG cache save failed: " + e.getMessage());
-                        pngCache.delete();
+                        jpgCache.delete();
                     }
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Pdfium render failed: " + e.getMessage());
             } finally {
                 try {
-                    if (pdfDocument != null && pdfiumCore != null)
+                    if (pdfDocument != null && pdfiumCore != null) {
                         pdfiumCore.closeDocument(pdfDocument);
-                } catch (Exception ignored) {}
+                    }
+                } catch (Exception ignored) {
+                }
             }
         });
     }
@@ -788,29 +814,29 @@ WebViewCompat.setRendererPriorityPolicy(
     private void preRenderAllSlides() {
         for (int i = 0; i < slides.size(); i++) {
             final Slide s = slides.get(i);
-            if ("pdf".equals(s.type) && s.localPath != null) {
-                final int idx = i;
-                if (idx == currentIndex) continue;
+            if (Slide.TYPE_PDF.equals(s.type) && s.localPath != null) {
+                if (i == currentIndex) continue;
                 renderPdf(s);
             }
         }
     }
 
-    // ─── dots ───────────────────────────────────────────────────────────────
-
     private void buildDots() {
         dotRow.removeAllViews();
         int size = dp(10);
         int margin = dp(4);
+
         for (int i = 0; i < slides.size(); i++) {
             View dot = new View(this);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(size, size);
             lp.setMargins(margin, 0, margin, 0);
             dot.setLayoutParams(lp);
+
             GradientDrawable d = new GradientDrawable();
             d.setShape(GradientDrawable.OVAL);
             d.setColor(0x66FFFFFF);
             dot.setBackground(d);
+
             dotRow.addView(dot);
         }
     }
@@ -829,10 +855,9 @@ WebViewCompat.setRendererPriorityPolicy(
         return (int) (v * getResources().getDisplayMetrics().density);
     }
 
-    // ─── auto-advance ───────────────────────────────────────────────────────
-
     private void scheduleAdvance() {
         main.removeCallbacks(advanceRunnable);
+
         int secs = 0;
         if (!slides.isEmpty() && currentIndex >= 0 && currentIndex < slides.size()) {
             secs = slides.get(currentIndex).duration;
@@ -840,6 +865,7 @@ WebViewCompat.setRendererPriorityPolicy(
         if (secs <= 0) secs = prefs.getRefreshSeconds();
         if (secs <= 0) secs = prefs.getDefaultSlideDuration();
         if (secs <= 0) secs = 10;
+
         main.postDelayed(advanceRunnable, secs * 1000L);
     }
 
@@ -857,14 +883,10 @@ WebViewCompat.setRendererPriorityPolicy(
         scheduleAdvance();
     }
 
-    // ─── clock ──────────────────────────────────────────────────────────────
-
     private void updateClock() {
         SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
         hudClock.setText(fmt.format(new Date()));
     }
-
-    // ─── D-pad / remote navigation ──────────────────────────────────────────
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
