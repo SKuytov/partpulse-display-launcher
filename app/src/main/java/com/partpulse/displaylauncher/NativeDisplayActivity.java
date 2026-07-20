@@ -1,5 +1,4 @@
 package com.partpulse.displaylauncher;
-
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
