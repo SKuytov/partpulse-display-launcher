@@ -143,7 +143,70 @@ public class NativeDisplayActivity extends Activity {
     };
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState) private void configureWebSlideView() {
+    WebSettings ws = webSlideView.getSettings();
+    ws.setJavaScriptEnabled(true);
+    ws.setDomStorageEnabled(true);
+    ws.setLoadWithOverviewMode(true);
+    ws.setUseWideViewPort(true);
+    ws.setBuiltInZoomControls(false);
+    ws.setDisplayZoomControls(false);
+    ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+    ws.setSupportMultipleWindows(false);
+    ws.setJavaScriptCanOpenWindowsAutomatically(false);
+
+    // Use software rendering to avoid GPU/driver freezes on signage devices
+    webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
+    // Disable long-press/context menu to avoid edge-case interactions
+    webSlideView.setOnLongClickListener(v -> true);
+    webSlideView.setLongClickable(false);
+
+    WebViewClientCompat client = new WebViewClientCompat() {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            // Keep navigation inside the WebView
+            return false;
+        }
+
+        @Override
+        public boolean onRenderProcessGone(
+                WebView view,
+                android.webkit.RenderProcessGoneDetail detail
+        ) {
+            // Renderer crashed or was killed: recreate WebView safely
+            recreateWebView();
+            return true;
+        }
+    };
+    webSlideView.setWebViewClient(client);
+
+    WebViewRenderProcess renderer = WebViewCompat.getRenderer(webSlideView);
+    if (renderer != null) {
+        WebViewRenderProcessClient rpc = new WebViewRenderProcessClient() {
+            @Override
+            public void onRenderProcessUnresponsive(WebView view,
+                                                    WebViewRenderProcess proc) {
+                WebViewRenderProcess r = WebViewCompat.getRenderer(webSlideView);
+                if (r != null) r.terminate(); // force restart
+                recreateWebView();
+            }
+
+            @Override
+            public void onRenderProcessResponsive(WebView view,
+                                                  WebViewRenderProcess proc) {
+                // Renderer recovered; nothing extra to do
+            }
+        };
+        WebViewCompat.setRenderProcessClient(webSlideView, rpc);
+    }
+
+    WebViewCompat.setRendererPriorityPolicy(
+            webSlideView,
+            WebViewCompat.RENDERER_PRIORITY_IMPORTANT,
+            false
+    );
+} {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -162,44 +225,44 @@ public class NativeDisplayActivity extends Activity {
         setFullscreen();
         setContentView(R.layout.activity_native_display);
 
-        pdfCanvas           = findViewById(R.id.pdfCanvas);
-        webSlideView        = findViewById(R.id.webSlideView);
-        notificationOverlay = findViewById(R.id.notificationOverlay);
-        notifWithImageLayout = findViewById(R.id.notifWithImageLayout);
-        notifTextPanel      = findViewById(R.id.notifTextPanel);
-        notifImagePanel     = findViewById(R.id.notifImagePanel);
-        notifTag            = findViewById(R.id.notifTag);
-        notifTitle          = findViewById(R.id.notifTitle);
-        notifBody           = findViewById(R.id.notifBody);
-        notifDate           = findViewById(R.id.notifDate);
-        notifImage          = findViewById(R.id.notifImage);
-        notifTagNoImg       = findViewById(R.id.notifTagNoImg);
-        notifTitleNoImg     = findViewById(R.id.notifTitleNoImg);
-        notifBodyNoImg      = findViewById(R.id.notifBodyNoImg);
-        notifDateNoImg      = findViewById(R.id.notifDateNoImg);
-        hudLabel            = findViewById(R.id.hudLabel);
-        hudClock            = findViewById(R.id.hudClock);
-        dotRow              = findViewById(R.id.dotRow);
-        progressBar         = findViewById(R.id.progressBar);
-        loadingSpinner      = findViewById(R.id.loadingSpinner);
+       // Configure WebView for full-screen webpage slides
+configureWebSlideView();
+        private void recreateWebView() {
+    try {
+        webSlideView.stopLoading();
+        webSlideView.loadUrl("about:blank");
+        webSlideView.clearHistory();
+        webSlideView.clearCache(true);
+        webSlideView.onPause();
+        webSlideView.destroy();
+    } catch (Exception ignored) {}
 
-        // Configure WebView for full-screen webpage slides
-        WebSettings ws = webSlideView.getSettings();
-        ws.setJavaScriptEnabled(true);
-        ws.setDomStorageEnabled(true);
-        ws.setLoadWithOverviewMode(true);
-        ws.setUseWideViewPort(true);
-        ws.setBuiltInZoomControls(false);
-        ws.setDisplayZoomControls(false);
-        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-        webSlideView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                // Keep all navigation inside the WebView (no external browser)
-                return false;
-            }
-        });
+    // Remove old view from parent
+    View parentView = (View) webSlideView.getParent();
+    FrameLayout parent = null;
+    if (parentView instanceof FrameLayout) {
+        parent = (FrameLayout) parentView;
+        parent.removeView(webSlideView);
+    }
 
+    // Create new WebView instance
+    webSlideView = new WebView(this);
+    webSlideView.setId(R.id.webSlideView);
+    webSlideView.setVisibility(View.GONE);
+
+    if (parent != null) {
+        parent.addView(
+                webSlideView,
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                )
+        );
+    }
+
+    // Reconfigure WebView
+    configureWebSlideView();
+}
         prefs = new AppPrefs(this);
         slideManager = new SlideManager();
 
@@ -217,31 +280,63 @@ public class NativeDisplayActivity extends Activity {
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        try {
-            if (screenWakeLock != null && !screenWakeLock.isHeld()) screenWakeLock.acquire();
-        } catch (Exception e) {
-            Log.w(TAG, "WakeLock acquire failed: " + e.getMessage());
-        }
-        main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
-        main.postDelayed(serviceCheckRunnable, SERVICE_CHECK_INTERVAL_MS);
-        // Resume WebView if it's currently shown
-        webSlideView.onResume();
+protected void onResume() {
+    super.onResume();
+    try {
+        if (screenWakeLock != null && !screenWakeLock.isHeld()) screenWakeLock.acquire();
+    } catch (Exception e) {
+        Log.w(TAG, "WakeLock acquire failed: " + e.getMessage());
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        main.removeCallbacks(keepAliveRunnable);
-        main.removeCallbacks(serviceCheckRunnable);
-        try {
-            if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
-        } catch (Exception e) {
-            Log.w(TAG, "WakeLock release failed: " + e.getMessage());
-        }
+    main.postDelayed(keepAliveRunnable, KEEPALIVE_INTERVAL_MS);
+    main.postDelayed(serviceCheckRunnable, SERVICE_CHECK_INTERVAL_MS);
+
+    if (webSlideView != null) {
+        webSlideView.onResume();
+        WebViewCompat.resumeTimers(webSlideView);
+    }
+}
+
+@Override
+protected void onPause() {
+    super.onPause();
+    main.removeCallbacks(keepAliveRunnable);
+    main.removeCallbacks(serviceCheckRunnable);
+    try {
+        if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
+    } catch (Exception e) {
+        Log.w(TAG, "WakeLock release failed: " + e.getMessage());
+    }
+
+    if (webSlideView != null) {
+        WebViewCompat.pauseTimers(webSlideView);
         webSlideView.onPause();
     }
+}
+
+@Override
+protected void onDestroy() {
+    super.onDestroy();
+    main.removeCallbacksAndMessages(null);
+    try { unregisterReceiver(updateReceiver); } catch (Exception ignored) {}
+    try {
+        if (screenWakeLock != null && screenWakeLock.isHeld()) screenWakeLock.release();
+    } catch (Exception ignored) {}
+
+    if (webSlideView != null) {
+        try {
+            webSlideView.stopLoading();
+            webSlideView.loadUrl("about:blank");
+            webSlideView.clearHistory();
+            webSlideView.clearCache(true);
+            WebViewCompat.pauseTimers(webSlideView);
+            webSlideView.onPause();
+            webSlideView.destroy();
+        } catch (Exception ignored) {}
+    }
+
+    renderExec.shutdownNow();
+}
 
     @Override
     protected void onDestroy() {
@@ -393,18 +488,21 @@ WebViewCompat.setRendererPriorityPolicy(
         updateDots(index);
 
         if (Slide.TYPE_WEBPAGE.equals(s.type)) {
-            // ── Webpage slide ──
-            pdfCanvas.setVisibility(View.GONE);
-            pdfCanvas.clearBitmap();
-            notificationOverlay.setVisibility(View.GONE);
-            webSlideView.setVisibility(View.VISIBLE);
-            // Only reload if the URL has changed (avoid flicker on re-cycle)
-            String current = webSlideView.getUrl();
-            if (current == null || !current.equals(s.url)) {
-                webSlideView.loadUrl(s.url);
-            } else {
-                webSlideView.reload();
-            }
+    // ── Webpage slide ──
+    pdfCanvas.setVisibility(View.GONE);
+    pdfCanvas.clearBitmap();
+    notificationOverlay.setVisibility(View.GONE);
+    webSlideView.setVisibility(View.VISIBLE);
+
+    if (s.url != null && !s.url.isEmpty()) {
+        // Aggressive reset each time to avoid stale state
+        webSlideView.stopLoading();
+        webSlideView.loadUrl("about:blank");
+        webSlideView.clearHistory();
+        webSlideView.clearCache(false);
+        webSlideView.loadUrl(s.url);
+    }
+}
 
         } else if (Slide.TYPE_NOTIFICATION.equals(s.type)) {
             // ── Notification slide ──
