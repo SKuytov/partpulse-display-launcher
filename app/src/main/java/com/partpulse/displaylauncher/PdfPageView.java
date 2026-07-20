@@ -30,7 +30,7 @@ public class PdfPageView extends View {
         paint.setFilterBitmap(false);     // 2x bitmap is downscaled — bilinear is sharp here
         paint.setAntiAlias(false);
         paint.setDither(false);
-        setLayerType(LAYER_TYPE_SOFTWARE, null);
+        setLayerType(LAYER_TYPE_HARDWARE, null);
     }
 
     public void setBitmap(Bitmap bmp) {
