@@ -739,9 +739,9 @@ public class NativeDisplayActivity extends Activity {
             return;
         }
 
-        final File jpgCache = new File(
+        final File pngCache = new File(
                 pdfFile.getParent(),
-                pdfFile.getName().replaceAll("\\.pdf$", "_rendered.jpg")
+                pdfFile.getName().replaceAll("\\.pdf$", "_rendered.png")
         );
 
         final DisplayMetrics realDm = new DisplayMetrics();
@@ -761,13 +761,13 @@ public class NativeDisplayActivity extends Activity {
         }
 
         renderExec.execute(() -> {
-            if (jpgCache.exists()) {
+            if (pngCache.exists()) {
                 try {
                     BitmapFactory.Options opts = new BitmapFactory.Options();
                     opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-                    final Bitmap cached = BitmapFactory.decodeFile(jpgCache.getAbsolutePath(), opts);
+                    final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
                     if (cached != null) {
-                        Log.i(TAG, "JPEG cache hit: " + jpgCache.getName());
+                        Log.i(TAG, "PNG cache hit: " + pngCache.getName());
                         bitmapCache.put(pdfFile.getAbsolutePath(), cached);
                         main.post(() -> {
                             pdfCanvas.setVisibility(View.VISIBLE);
@@ -776,12 +776,12 @@ public class NativeDisplayActivity extends Activity {
                         return;
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "JPEG cache decode failed, re-rendering: " + e.getMessage());
-                    jpgCache.delete();
+                    Log.w(TAG, "PNG cache decode failed, re-rendering: " + e.getMessage());
+                    pngCache.delete();
                 }
             }
 
-            Log.i(TAG, "JPEG cache miss — rendering via Pdfium: " + pdfFile.getName());
+            Log.i(TAG, "PNG cache miss — rendering via Pdfium: " + pdfFile.getName());
 
             PdfiumCore pdfiumCore = null;
             PdfDocument pdfDocument = null;
@@ -834,12 +834,12 @@ public class NativeDisplayActivity extends Activity {
                 });
 
                 saveExec.execute(() -> {
-                    try (FileOutputStream fos = new FileOutputStream(jpgCache)) {
-                        finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                        Log.i(TAG, "JPEG cache saved: " + jpgCache.getName());
+                    try (FileOutputStream fos = new FileOutputStream(pngCache)) {
+                        finalBmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                        Log.i(TAG, "PNG cache saved: " + pngCache.getName());
                     } catch (Exception e) {
-                        Log.w(TAG, "JPEG cache save failed: " + e.getMessage());
-                        jpgCache.delete();
+                        Log.w(TAG, "PNG cache save failed: " + e.getMessage());
+                        pngCache.delete();
                     }
                 });
             } catch (Exception e) {
