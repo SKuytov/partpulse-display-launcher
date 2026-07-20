@@ -303,7 +303,60 @@ public class NativeDisplayActivity extends Activity {
             Log.w(TAG, "SSE service start failed: " + e.getMessage());
         }
     }
+ws.setSupportMultipleWindows(false);
+ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
+// Use software rendering on signage devices to avoid GPU driver freezes
+webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
+// Disable long-press/context menu to avoid selection edge cases
+webSlideView.setOnLongClickListener(v -> true);
+webSlideView.setLongClickable(false);
+
+// Robust WebViewClient with renderer crash handling (replace the current WebViewClient)
+WebViewClientCompat client = new WebViewClientCompat() {
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        return false; // keep navigation inside WebView
+    }
+
+    @Override
+    public boolean onRenderProcessGone(WebView view,
+                                       android.webkit.RenderProcessGoneDetail detail) {
+        // Renderer crashed or was killed: recreate safe WebView
+        recreateWebView();
+        return true; // we handled it
+    }
+};
+webSlideView.setWebViewClient(client);
+
+// Bind a render-process client for unresponsive renderer handling (API 10+)
+WebViewRenderProcess renderer = WebViewCompat.getRenderer(webSlideView);
+if (renderer != null) {
+    WebViewRenderProcessClient rpc = new WebViewRenderProcessClient() {
+        @Override
+        public void onRenderProcessUnresponsive(WebView view,
+                                                WebViewRenderProcess proc) {
+            WebViewRenderProcess r = WebViewCompat.getRenderer(webSlideView);
+            if (r != null) r.terminate();  // force restart [web:108][web:90]
+            recreateWebView();
+        }
+
+        @Override
+        public void onRenderProcessResponsive(WebView view,
+                                              WebViewRenderProcess proc) {
+            // Renderer recovered; nothing extra needed
+        }
+    };
+    WebViewCompat.setRenderProcessClient(webSlideView, rpc);
+}
+
+// Raise renderer priority to reduce OOM kills [web:60][web:58]
+WebViewCompat.setRendererPriorityPolicy(
+        webSlideView,
+        WebViewCompat.RENDERER_PRIORITY_IMPORTANT,
+        false
+);
     // ─── slide display ──────────────────────────────────────────────────────
 
     private void showSlide(int index) {
