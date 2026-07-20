@@ -257,7 +257,7 @@ public class NativeDisplayActivity extends Activity {
         ws.setSupportMultipleWindows(false);
         ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
-        webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        webSlideView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webSlideView.setOnLongClickListener(v -> true);
         webSlideView.setLongClickable(false);
         webSlideView.setHapticFeedbackEnabled(false);
