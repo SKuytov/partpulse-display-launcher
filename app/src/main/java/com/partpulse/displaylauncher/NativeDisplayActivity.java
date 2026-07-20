@@ -1,4 +1,5 @@
 package com.partpulse.displaylauncher;
+
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -254,10 +255,38 @@ public class NativeDisplayActivity extends Activity {
 } catch (Throwable t) {
     Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
 }
-);
-        } catch (Throwable t) {
-            Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
-        }
+
+try {
+    WebViewCompat.setWebViewRenderProcessClient(
+            webSlideView,
+            new WebViewRenderProcessClient() {
+                @Override
+                public void onRenderProcessUnresponsive(
+                        WebView view,
+                        WebViewRenderProcess renderer
+                ) {
+                    Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
+                    try {
+                        if (renderer != null) {
+                            renderer.terminate();
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    recreateWebView();
+                }
+
+                @Override
+                public void onRenderProcessResponsive(
+                        WebView view,
+                        WebViewRenderProcess renderer
+                ) {
+                    Log.i(TAG, "WebView renderer responsive again.");
+                }
+            }
+    );
+} catch (Throwable t) {
+    Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
+}
 
         try {
             WebViewCompat.setWebViewRenderProcessClient(
