@@ -325,6 +325,32 @@ WebViewClientCompat client = new WebViewClientCompat() {
                                        android.webkit.RenderProcessGoneDetail detail) {
         // Renderer crashed or was killed: recreate safe WebView
         recreateWebView();
+        private void recreateWebView() {
+    try {
+        webSlideView.stopLoading();
+        webSlideView.loadUrl("about:blank");
+        webSlideView.clearHistory();
+        webSlideView.clearCache(true);
+        webSlideView.onPause();
+        webSlideView.destroy();
+    } catch (Exception ignored) {}
+
+    // Recreate and reattach WebView
+    webSlideView = new WebView(this);
+    webSlideView.setId(R.id.webSlideView);
+
+    FrameLayout root = findViewById(android.R.id.content);
+    // Or your specific root layout if activity_native_display.xml has one
+    root.addView(webSlideView,
+        new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+    );
+
+    // Re-run WebView configuration (factor into initWebView() to avoid duplication)
+    configureWebSlideView();
+}
         return true; // we handled it
     }
 };
