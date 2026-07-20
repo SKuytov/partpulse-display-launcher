@@ -73,110 +73,86 @@ public class NativeDisplayActivity extends Activity {
     private View progressBar;
     private ProgressBar loadingSpinner;
 
-    private SlideManager slideManager;
-    private AppPrefs prefs;
-    private final List<Slide> slides = new ArrayList<>();
-    private int currentIndex = 0;
-    
-    // Restart app every 1 hours to improve long-run stability
-private static final long APP_RESTART_INTERVAL_MS = 2L * 60L * 60L * 1000L; // 1 hours
-private final Runnable appRestartRunnable = new Runnable() {
-    @Override
-    public void run() {
-        try {
-            Log.i(TAG, "Scheduled app restart: relaunching NativeDisplayActivity");
-            Context ctx = NativeDisplayActivity.this.getApplicationContext();
-            Intent restartIntent = new Intent(ctx, NativeDisplayActivity.class);
-            restartIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            ctx.startActivity(restartIntent);
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to start restart activity: " + t.getMessage());
-        }
+private SlideManager slideManager;
+private AppPrefs prefs;
+private final List<Slide> slides = new ArrayList<>();
+private int currentIndex = 0;
 
-        try {
-            // Finish the current activity so the new one becomes the foreground
-            finish();
-        } catch (Throwable t) {
-            Log.w(TAG, "Failed to finish activity during restart: " + t.getMessage());
-        }
+private final Handler main = new Handler(Looper.getMainLooper());
+private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
+private final ExecutorService saveExec = Executors.newSingleThreadExecutor();
+
+private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
+        (int) (Runtime.getRuntime().maxMemory() / 4)
+) {
+    @Override
+    protected int sizeOf(String key, Bitmap value) {
+        return value.getByteCount();
     }
 };
 
-    private final Handler main = new Handler(Looper.getMainLooper());
-    private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
-    private final ExecutorService saveExec = Executors.newSingleThreadExecutor();
+private PowerManager.WakeLock screenWakeLock;
+private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
+private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
 
-    private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
-            (int) (Runtime.getRuntime().maxMemory() / 4)
-    ) {
-        @Override
-        protected int sizeOf(String key, Bitmap value) {
-            return value.getByteCount();
-        }
-    };
+private final Runnable serviceCheckRunnable = new Runnable() {
+    @Override
+    public void run() {
+        startSseService();
+        main.postDelayed(this, SERVICE_CHECK_INTERVAL_MS);
+    }
+};
 
-    private PowerManager.WakeLock screenWakeLock;
-    private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
-    private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
-
-    private final Runnable serviceCheckRunnable = new Runnable() {
-        @Override
-        public void run() {
-            startSseService();
-            main.postDelayed(this, SERVICE_CHECK_INTERVAL_MS);
-        }
-    };
-
-    private final Runnable keepAliveRunnable = new Runnable() {
-        @Override
-        public void run() {
-            try {
-                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-                if (pm != null) {
-                    try {
-                        java.lang.reflect.Method ua = pm.getClass()
-                                .getMethod("userActivity", long.class, boolean.class);
-                        ua.invoke(pm, SystemClock.uptimeMillis(), false);
-                    } catch (Exception ignored) {
-                    }
+private final Runnable keepAliveRunnable = new Runnable() {
+    @Override
+    public void run() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                try {
+                    java.lang.reflect.Method ua = pm.getClass()
+                            .getMethod("userActivity", long.class, boolean.class);
+                    ua.invoke(pm, SystemClock.uptimeMillis(), false);
+                } catch (Exception ignored) {
                 }
-            } catch (Exception e) {
-                Log.w(TAG, "userActivity failed: " + e.getMessage());
             }
-
-            runOnUiThread(() ->
-                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
-
-            main.postDelayed(this, KEEPALIVE_INTERVAL_MS);
+        } catch (Exception e) {
+            Log.w(TAG, "userActivity failed: " + e.getMessage());
         }
-    };
 
-    private final Runnable advanceRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (!slides.isEmpty()) {
-                currentIndex = (currentIndex + 1) % slides.size();
-                showSlide(currentIndex);
-            }
-            scheduleAdvance();
-        }
-    };
+        runOnUiThread(() ->
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
 
-    private final Runnable clockRunnable = new Runnable() {
-        @Override
-        public void run() {
-            updateClock();
-            main.postDelayed(this, 1_000L);
-        }
-    };
+        main.postDelayed(this, KEEPALIVE_INTERVAL_MS);
+    }
+};
 
-    private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context ctx, Intent intent) {
-            Log.i(TAG, "Slides update broadcast received, refreshing...");
-            loadSlides();
+private final Runnable advanceRunnable = new Runnable() {
+    @Override
+    public void run() {
+        if (!slides.isEmpty()) {
+            currentIndex = (currentIndex + 1) % slides.size();
+            showSlide(currentIndex);
         }
-    };
+        scheduleAdvance();
+    }
+};
+
+private final Runnable clockRunnable = new Runnable() {
+    @Override
+    public void run() {
+        updateClock();
+        main.postDelayed(this, 1_000L);
+    }
+};
+
+private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context ctx, Intent intent) {
+        Log.i(TAG, "Slides update broadcast received, refreshing...");
+        loadSlides();
+    }
+};
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -240,7 +216,7 @@ private final Runnable appRestartRunnable = new Runnable() {
         main.postDelayed(appRestartRunnable, APP_RESTART_INTERVAL_MS);
     }
 
-    private void configureWebSlideView() {
+private void configureWebSlideView() {
     if (webSlideView == null) return;
 
     WebSettings ws = webSlideView.getSettings();
@@ -254,7 +230,8 @@ private final Runnable appRestartRunnable = new Runnable() {
     ws.setSupportMultipleWindows(false);
     ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
-    webSlideView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+    // For iiyama signage stability, start with software layer.
+    webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
     webSlideView.setOnLongClickListener(v -> true);
     webSlideView.setLongClickable(false);
     webSlideView.setHapticFeedbackEnabled(false);
