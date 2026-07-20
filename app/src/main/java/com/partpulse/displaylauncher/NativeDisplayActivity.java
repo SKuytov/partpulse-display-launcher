@@ -57,13 +57,12 @@ import java.util.concurrent.Executors;
 public class NativeDisplayActivity extends Activity {
 
     private static final String TAG = "NativeDisplay";
+
     public static final String ACTION_SLIDES_UPDATED =
             "com.partpulse.displaylauncher.SLIDES_UPDATED";
 
     private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
     private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
-
-    // Adjust if needed: 1h is safe for recovery-first testing.
     private static final long APP_RESTART_INTERVAL_MS = 1L * 60L * 60L * 1000L;
 
     private PdfPageView pdfCanvas;
@@ -72,10 +71,17 @@ public class NativeDisplayActivity extends Activity {
     private LinearLayout notifWithImageLayout;
     private LinearLayout notifTextPanel;
     private LinearLayout notifImagePanel;
-    private TextView notifTag, notifTitle, notifBody, notifDate;
-    private TextView notifTagNoImg, notifTitleNoImg, notifBodyNoImg, notifDateNoImg;
+    private TextView notifTag;
+    private TextView notifTitle;
+    private TextView notifBody;
+    private TextView notifDate;
+    private TextView notifTagNoImg;
+    private TextView notifTitleNoImg;
+    private TextView notifBodyNoImg;
+    private TextView notifDateNoImg;
     private ImageView notifImage;
-    private TextView hudLabel, hudClock;
+    private TextView hudLabel;
+    private TextView hudClock;
     private LinearLayout dotRow;
     private View progressBar;
     private ProgressBar loadingSpinner;
@@ -155,7 +161,10 @@ public class NativeDisplayActivity extends Activity {
         public void run() {
             try {
                 Log.i(TAG, "Scheduled app restart triggered");
-                Intent restartIntent = new Intent(NativeDisplayActivity.this, NativeDisplayActivity.class);
+                Intent restartIntent = new Intent(
+                        NativeDisplayActivity.this,
+                        NativeDisplayActivity.class
+                );
                 restartIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                 startActivity(restartIntent);
                 finish();
@@ -248,7 +257,6 @@ public class NativeDisplayActivity extends Activity {
         ws.setSupportMultipleWindows(false);
         ws.setJavaScriptCanOpenWindowsAutomatically(false);
 
-        // For signage stability, software layer is safer on problematic panels.
         webSlideView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         webSlideView.setOnLongClickListener(v -> true);
         webSlideView.setLongClickable(false);
@@ -329,7 +337,6 @@ public class NativeDisplayActivity extends Activity {
                 if (parent == null) return;
 
                 int insertIndex = parent.indexOfChild(webSlideView);
-
                 parent.removeView(webSlideView);
 
                 try {
@@ -910,6 +917,7 @@ public class NativeDisplayActivity extends Activity {
         if (!slides.isEmpty() && currentIndex >= 0 && currentIndex < slides.size()) {
             secs = slides.get(currentIndex).duration;
         }
+
         if (secs <= 0) secs = prefs.getRefreshSeconds();
         if (secs <= 0) secs = prefs.getDefaultSlideDuration();
         if (secs <= 0) secs = 10;
