@@ -248,11 +248,11 @@ public class NativeDisplayActivity extends Activity {
         });
 
         try {
-            WebViewCompat.setRendererPriorityPolicy(
-                    webSlideView,
-                    WebViewCompat.RENDERER_PRIORITY_IMPORTANT,
-                    false
-            );
+           WebViewCompat.setRendererPriorityPolicy(
+        webSlideView,
+        WebView.RENDERER_PRIORITY_IMPORTANT,
+        false
+);
         } catch (Throwable t) {
             Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
         }
@@ -300,7 +300,7 @@ public class NativeDisplayActivity extends Activity {
                         webSlideView.clearHistory();
                         webSlideView.clearCache(true);
                         webSlideView.onPause();
-                    } catch (Exception ignored) {
+                    } catch (Throwable ignored) {
                     }
 
                     ViewGroup parent = (ViewGroup) webSlideView.getParent();
@@ -352,8 +352,8 @@ public class NativeDisplayActivity extends Activity {
 
         if (webSlideView != null) {
             try {
-                webSlideView.onResume();
-                WebView.resumeTimers();
+               webSlideView.onResume();
+               webSlideView.resumeTimers();
             } catch (Throwable ignored) {
             }
         }
@@ -376,7 +376,7 @@ public class NativeDisplayActivity extends Activity {
         if (webSlideView != null) {
             try {
                 webSlideView.onPause();
-                WebView.pauseTimers();
+                webSlideView.pauseTimers();
             } catch (Throwable ignored) {
             }
         }
