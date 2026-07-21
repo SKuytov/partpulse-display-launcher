@@ -21,8 +21,8 @@ import android.util.LruCache;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 import android.view.animation.LinearInterpolator;
+import android.view.WindowManager;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -41,7 +41,6 @@ import com.shockwave.pdfium.PdfDocument;
 import com.shockwave.pdfium.PdfiumCore;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -57,13 +56,8 @@ import java.util.concurrent.Executors;
 public class NativeDisplayActivity extends Activity {
 
     private static final String TAG = "NativeDisplay";
-
     public static final String ACTION_SLIDES_UPDATED =
             "com.partpulse.displaylauncher.SLIDES_UPDATED";
-
-    private static final long KEEPALIVE_INTERVAL_MS = 3L * 60L * 1000L;
-    private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
-    private static final long APP_RESTART_INTERVAL_MS = 1L * 60L * 60L * 1000L;
 
     private PdfPageView pdfCanvas;
     private WebView webSlideView;
@@ -71,17 +65,10 @@ public class NativeDisplayActivity extends Activity {
     private LinearLayout notifWithImageLayout;
     private LinearLayout notifTextPanel;
     private LinearLayout notifImagePanel;
-    private TextView notifTag;
-    private TextView notifTitle;
-    private TextView notifBody;
-    private TextView notifDate;
-    private TextView notifTagNoImg;
-    private TextView notifTitleNoImg;
-    private TextView notifBodyNoImg;
-    private TextView notifDateNoImg;
+    private TextView notifTag, notifTitle, notifBody, notifDate;
+    private TextView notifTagNoImg, notifTitleNoImg, notifBodyNoImg, notifDateNoImg;
     private ImageView notifImage;
-    private TextView hudLabel;
-    private TextView hudClock;
+    private TextView hudLabel, hudClock;
     private LinearLayout dotRow;
     private View progressBar;
     private ProgressBar loadingSpinner;
@@ -95,15 +82,18 @@ public class NativeDisplayActivity extends Activity {
     private final ExecutorService renderExec = Executors.newSingleThreadExecutor();
     private final ExecutorService saveExec = Executors.newSingleThreadExecutor();
 
-    private final LruCache<String, Bitmap> bitmapCache =
-            new LruCache<String, Bitmap>((int) (Runtime.getRuntime().maxMemory() / 4)) {
-                @Override
-                protected int sizeOf(String key, Bitmap value) {
-                    return value.getByteCount();
-                }
-            };
+    private final LruCache<String, Bitmap> bitmapCache = new LruCache<String, Bitmap>(
+            (int) (Runtime.getRuntime().maxMemory() / 4)
+    ) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getByteCount();
+        }
+    };
 
     private PowerManager.WakeLock screenWakeLock;
+    private static final long KEEPALIVE_INTERVAL_MS = 3 * 60 * 1000L;
+    private static final long SERVICE_CHECK_INTERVAL_MS = 5 * 60_000L;
 
     private final Runnable serviceCheckRunnable = new Runnable() {
         @Override
@@ -120,8 +110,8 @@ public class NativeDisplayActivity extends Activity {
                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                 if (pm != null) {
                     try {
-                        java.lang.reflect.Method ua =
-                                pm.getClass().getMethod("userActivity", long.class, boolean.class);
+                        java.lang.reflect.Method ua = pm.getClass()
+                                .getMethod("userActivity", long.class, boolean.class);
                         ua.invoke(pm, SystemClock.uptimeMillis(), false);
                     } catch (Exception ignored) {
                     }
@@ -153,24 +143,6 @@ public class NativeDisplayActivity extends Activity {
         public void run() {
             updateClock();
             main.postDelayed(this, 1_000L);
-        }
-    };
-
-    private final Runnable appRestartRunnable = new Runnable() {
-        @Override
-        public void run() {
-            try {
-                Log.i(TAG, "Scheduled app restart triggered");
-                Intent restartIntent = new Intent(
-                        NativeDisplayActivity.this,
-                        NativeDisplayActivity.class
-                );
-                restartIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                startActivity(restartIntent);
-                finish();
-            } catch (Exception e) {
-                Log.e(TAG, "Scheduled app restart failed", e);
-            }
         }
     };
 
@@ -240,7 +212,6 @@ public class NativeDisplayActivity extends Activity {
 
         loadSlides();
         startSseService();
-        main.postDelayed(appRestartRunnable, APP_RESTART_INTERVAL_MS);
     }
 
     private void configureWebSlideView() {
@@ -277,13 +248,45 @@ public class NativeDisplayActivity extends Activity {
         });
 
         try {
-            webSlideView.setRendererPriorityPolicy(
-                    WebView.RENDERER_PRIORITY_IMPORTANT,
-                    false
-            );
-        } catch (Throwable t) {
-            Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
-        }
+    webSlideView.setRendererPriorityPolicy(
+            WebView.RENDERER_PRIORITY_IMPORTANT,
+            false
+    );
+} catch (Throwable t) {
+    Log.w(TAG, "Renderer priority policy not available: " + t.getMessage());
+}
+
+try {
+    WebViewCompat.setWebViewRenderProcessClient(
+            webSlideView,
+            new WebViewRenderProcessClient() {
+                @Override
+                public void onRenderProcessUnresponsive(
+                        WebView view,
+                        WebViewRenderProcess renderer
+                ) {
+                    Log.e(TAG, "WebView renderer unresponsive. Recreating WebView.");
+                    try {
+                        if (renderer != null) {
+                            renderer.terminate();
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    recreateWebView();
+                }
+
+                @Override
+                public void onRenderProcessResponsive(
+                        WebView view,
+                        WebViewRenderProcess renderer
+                ) {
+                    Log.i(TAG, "WebView renderer responsive again.");
+                }
+            }
+    );
+} catch (Throwable t) {
+    Log.w(TAG, "RenderProcessClient not available: " + t.getMessage());
+}
 
         try {
             WebViewCompat.setWebViewRenderProcessClient(
@@ -321,41 +324,43 @@ public class NativeDisplayActivity extends Activity {
     private void recreateWebView() {
         main.post(() -> {
             try {
-                if (webSlideView == null) return;
+                if (webSlideView != null) {
+                    try {
+                        webSlideView.stopLoading();
+                        webSlideView.loadUrl("about:blank");
+                        webSlideView.clearHistory();
+                        webSlideView.clearCache(true);
+                        webSlideView.onPause();
+                    } catch (Throwable ignored) {
+                    }
 
-                try {
-                    webSlideView.stopLoading();
-                    webSlideView.loadUrl("about:blank");
-                    webSlideView.clearHistory();
-                    webSlideView.clearCache(true);
-                    webSlideView.onPause();
-                    webSlideView.pauseTimers();
-                } catch (Throwable ignored) {
+                    ViewGroup parent = (ViewGroup) webSlideView.getParent();
+                    if (parent != null) {
+                        parent.removeView(webSlideView);
+
+                        WebView newWebView = new WebView(this);
+                        newWebView.setId(R.id.webSlideView);
+                        newWebView.setVisibility(View.GONE);
+
+                        int index = parent.indexOfChild(pdfCanvas);
+                        if (index < 0) {
+                            index = 0;
+                        }
+
+                        parent.addView(
+                                newWebView,
+                                index + 1,
+                                new FrameLayout.LayoutParams(
+                                        FrameLayout.LayoutParams.MATCH_PARENT,
+                                        FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                        );
+
+                        webSlideView.destroy();
+                        webSlideView = newWebView;
+                        configureWebSlideView();
+                    }
                 }
-
-                ViewGroup parent = (ViewGroup) webSlideView.getParent();
-                if (parent == null) return;
-
-                int insertIndex = parent.indexOfChild(webSlideView);
-                parent.removeView(webSlideView);
-
-                try {
-                    webSlideView.destroy();
-                } catch (Throwable ignored) {
-                }
-
-                WebView newWebView = new WebView(this);
-                newWebView.setId(R.id.webSlideView);
-                newWebView.setVisibility(View.GONE);
-
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                );
-                parent.addView(newWebView, insertIndex >= 0 ? insertIndex : 0, lp);
-
-                webSlideView = newWebView;
-                configureWebSlideView();
             } catch (Exception e) {
                 Log.e(TAG, "Failed to recreate WebView", e);
             }
@@ -365,7 +370,6 @@ public class NativeDisplayActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-
         try {
             if (screenWakeLock != null && !screenWakeLock.isHeld()) {
                 screenWakeLock.acquire();
@@ -379,8 +383,8 @@ public class NativeDisplayActivity extends Activity {
 
         if (webSlideView != null) {
             try {
-                webSlideView.onResume();
-                webSlideView.resumeTimers();
+               webSlideView.onResume();
+               webSlideView.resumeTimers();
             } catch (Throwable ignored) {
             }
         }
@@ -389,7 +393,6 @@ public class NativeDisplayActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-
         main.removeCallbacks(keepAliveRunnable);
         main.removeCallbacks(serviceCheckRunnable);
 
@@ -413,7 +416,6 @@ public class NativeDisplayActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-
         main.removeCallbacksAndMessages(null);
 
         try {
@@ -435,7 +437,6 @@ public class NativeDisplayActivity extends Activity {
                 webSlideView.clearHistory();
                 webSlideView.clearCache(true);
                 webSlideView.onPause();
-                webSlideView.pauseTimers();
                 webSlideView.destroy();
             } catch (Exception ignored) {
             }
@@ -500,7 +501,6 @@ public class NativeDisplayActivity extends Activity {
 
     private void showSlide(int index) {
         if (index < 0 || index >= slides.size()) return;
-
         final Slide s = slides.get(index);
 
         applyLabelChip(s);
@@ -518,8 +518,6 @@ public class NativeDisplayActivity extends Activity {
                     webSlideView.loadUrl("about:blank");
                     webSlideView.clearHistory();
                     webSlideView.clearCache(false);
-                    webSlideView.resumeTimers();
-                    webSlideView.onResume();
                     webSlideView.loadUrl(s.url);
                 } catch (Exception e) {
                     Log.e(TAG, "Failed loading webpage slide: " + s.url, e);
@@ -530,15 +528,6 @@ public class NativeDisplayActivity extends Activity {
             pdfCanvas.setVisibility(View.GONE);
             pdfCanvas.clearBitmap();
             webSlideView.setVisibility(View.GONE);
-
-            try {
-                webSlideView.stopLoading();
-                webSlideView.loadUrl("about:blank");
-                webSlideView.onPause();
-                webSlideView.pauseTimers();
-            } catch (Exception ignored) {
-            }
-
             notificationOverlay.setVisibility(View.VISIBLE);
 
             String tagText;
@@ -559,19 +548,16 @@ public class NativeDisplayActivity extends Activity {
                         tagText = "ИНФОРМАЦИЯ";
                         break;
                     default:
-                        tagText = s.lblClass.replace("lbl-", "")
-                                .replace("lbl_", "")
-                                .replace("-", " ")
-                                .replace("_", " ")
-                                .toUpperCase(Locale.getDefault());
+                        tagText = s.lblClass.replace("lbl-", "").replace("lbl_", "")
+                                .replace("-", " ").replace("_", " ")
+                                .toUpperCase();
                         break;
                 }
             } else {
                 tagText = "СЪОБЩЕНИЕ";
             }
 
-            boolean hasImage = s.localPath != null
-                    && !s.localPath.isEmpty()
+            boolean hasImage = s.localPath != null && !s.localPath.isEmpty()
                     && new File(s.localPath).exists();
 
             if (hasImage) {
@@ -589,7 +575,6 @@ public class NativeDisplayActivity extends Activity {
                     BitmapFactory.Options opts = new BitmapFactory.Options();
                     opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
                     final Bitmap bmp = BitmapFactory.decodeFile(imgPath, opts);
-
                     main.post(() -> {
                         if (bmp != null) {
                             notifImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -603,15 +588,6 @@ public class NativeDisplayActivity extends Activity {
         } else {
             notificationOverlay.setVisibility(View.GONE);
             webSlideView.setVisibility(View.GONE);
-
-            try {
-                webSlideView.stopLoading();
-                webSlideView.loadUrl("about:blank");
-                webSlideView.onPause();
-                webSlideView.pauseTimers();
-            } catch (Exception ignored) {
-            }
-
             pdfCanvas.setVisibility(View.VISIBLE);
             renderPdf(s);
         }
@@ -739,9 +715,9 @@ public class NativeDisplayActivity extends Activity {
             return;
         }
 
-        final File pngCache = new File(
+        final File jpgCache = new File(
                 pdfFile.getParent(),
-                pdfFile.getName().replaceAll("\\.pdf$", "_rendered.png")
+                pdfFile.getName().replaceAll("\\.pdf$", "_rendered.jpg")
         );
 
         final DisplayMetrics realDm = new DisplayMetrics();
@@ -761,13 +737,13 @@ public class NativeDisplayActivity extends Activity {
         }
 
         renderExec.execute(() -> {
-            if (pngCache.exists()) {
+            if (jpgCache.exists()) {
                 try {
                     BitmapFactory.Options opts = new BitmapFactory.Options();
                     opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-                    final Bitmap cached = BitmapFactory.decodeFile(pngCache.getAbsolutePath(), opts);
+                    final Bitmap cached = BitmapFactory.decodeFile(jpgCache.getAbsolutePath(), opts);
                     if (cached != null) {
-                        Log.i(TAG, "PNG cache hit: " + pngCache.getName());
+                        Log.i(TAG, "JPEG cache hit: " + jpgCache.getName());
                         bitmapCache.put(pdfFile.getAbsolutePath(), cached);
                         main.post(() -> {
                             pdfCanvas.setVisibility(View.VISIBLE);
@@ -776,12 +752,12 @@ public class NativeDisplayActivity extends Activity {
                         return;
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "PNG cache decode failed, re-rendering: " + e.getMessage());
-                    pngCache.delete();
+                    Log.w(TAG, "JPEG cache decode failed, re-rendering: " + e.getMessage());
+                    jpgCache.delete();
                 }
             }
 
-            Log.i(TAG, "PNG cache miss — rendering via Pdfium: " + pdfFile.getName());
+            Log.i(TAG, "JPEG cache miss — rendering via Pdfium: " + pdfFile.getName());
 
             PdfiumCore pdfiumCore = null;
             PdfDocument pdfDocument = null;
@@ -834,16 +810,16 @@ public class NativeDisplayActivity extends Activity {
                 });
 
                 saveExec.execute(() -> {
-                    try (FileOutputStream fos = new FileOutputStream(pngCache)) {
-                        finalBmp.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                        Log.i(TAG, "PNG cache saved: " + pngCache.getName());
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(jpgCache)) {
+                        finalBmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+                        Log.i(TAG, "JPEG cache saved: " + jpgCache.getName());
                     } catch (Exception e) {
-                        Log.w(TAG, "PNG cache save failed: " + e.getMessage());
-                        pngCache.delete();
+                        Log.w(TAG, "JPEG cache save failed: " + e.getMessage());
+                        jpgCache.delete();
                     }
                 });
             } catch (Exception e) {
-                Log.e(TAG, "Pdfium render failed: " + e.getMessage(), e);
+                Log.e(TAG, "Pdfium render failed: " + e.getMessage());
             } finally {
                 try {
                     if (pdfDocument != null && pdfiumCore != null) {
@@ -917,7 +893,6 @@ public class NativeDisplayActivity extends Activity {
         if (!slides.isEmpty() && currentIndex >= 0 && currentIndex < slides.size()) {
             secs = slides.get(currentIndex).duration;
         }
-
         if (secs <= 0) secs = prefs.getRefreshSeconds();
         if (secs <= 0) secs = prefs.getDefaultSlideDuration();
         if (secs <= 0) secs = 10;
