@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Septona Bulgaria AD — Lobby Display</title>
+  <style>
+    :root {
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #07102e;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .stage {
+      position: relative;
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── BACKGROUND IMAGE CROSSFADE ── */
+    .bg-slide {
+      position: absolute; inset: 0;
+      background-size: cover;
+      background-position: center;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity 2.4s ease-in-out;
+    }
+    .bg-slide.active { opacity: 1; }
+
+    .bg-slide-1 {
+      background-image: url('4.png');
+    }
+    .bg-slide-2 {
+      background-image: url('2.png');
+    }
+
+    /* Soft dark overlay so logo pops */
+    .bg-vignette {
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 60% 60% at 50% 50%, rgba(12, 12, 15, 0.295) 0%, rgba(22, 19, 19, 0.205) 100%);
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    /* ── PARTICLES ── */
+    .particles { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.712);
+      filter: blur(1px);
+      animation: floatUp linear infinite;
+    }
+    @keyframes floatUp {
+      0%   { transform: translateY(0) translateX(0); opacity: 0; }
+      5%   { opacity: 1; }
+      95%  { opacity: 0.4; }
+      100% { transform: translateY(-110vh) translateX(30px); opacity: 0; }
+    }
+
+    /* ── CLOCK (top-right) ── */
+    .live-clock {
+      position: absolute;
+      top: clamp(18px, 3vh, 44px);
+      right: clamp(28px, 4vw, 60px);
+      z-index: 12;
+      text-align: right;
+      opacity: 0;
+      animation: riseIn 0.9s 0.6s var(--ease-out) forwards;
+    }
+    .clock-time {
+      font-size: clamp(28px, 3vw, 56px);
+      font-weight: 200;
+      color: rgba(255,255,255,0.90);
+      letter-spacing: 0.06em;
+      font-variant-numeric: tabular-nums;
+      text-shadow: 0 2px 18px rgba(0,0,0,0.6);
+    }
+    .clock-date {
+      font-size: clamp(10px, 0.85vw, 14px);
+      color: rgba(255,255,255,0.50);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-top: 5px;
+      text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+    }
+
+    /* ── CENTERED LOGO ── */
+    .logo-center {
+      position: absolute; inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      animation: riseIn 1.2s 0.4s var(--ease-out) forwards;
+    }
+    .logo-img {
+      width: clamp(320px, 38vw, 680px);
+      height: auto;
+      filter:
+        drop-shadow(0 0 60px rgba(255, 255, 255, 0.55))
+        drop-shadow(0 4px 20px rgba(255, 255, 255, 0.8));
+      animation: logoPulse 7s 1.6s ease-in-out infinite;
+    }
+    @keyframes logoPulse {
+      0%, 100% {
+        filter:
+          drop-shadow(0 0 50px rgb(255, 255, 255))
+          drop-shadow(0 4px 20px rgba(255, 255, 255, 0.925));
+      }
+      50% {
+        filter:
+          drop-shadow(0 0 80px rgba(255, 255, 255, 0.397))
+          drop-shadow(0 6px 28px rgba(114, 114, 114, 0.65));
+      }
+    }
+
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(22px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- Crossfading background images -->
+  <div class="bg-slide bg-slide-1 active" id="bgSlide1"></div>
+  <div class="bg-slide bg-slide-2"        id="bgSlide2"></div>
+
+  <!-- Vignette overlay -->
+  <div class="bg-vignette"></div>
+
+  <!-- Floating particles -->
+  <div class="particles" id="particles"></div>
+
+  <!-- Clock / Date -->
+  <div class="live-clock">
+    <div class="clock-time" id="clockTime">00:00:00</div>
+    <div class="clock-date" id="clockDate"></div>
+  </div>
+
+  <!-- Logo — centered, dominant -->
+  <div class="logo-center">
+    <img
+      class="logo-img"
+      src="Septona_logo_.png"
+      alt="Septona Bulgaria"
+      width="1020" height="552"
+      loading="eager"
+    />
+  </div>
+
+</div>
+
+<script>
+  /* ── LIVE CLOCK ── */
+  const DAYS   = ['Неделя','Понеделник','Вторник','Сряда','Четвъртък','Петък','Събота'];
+  const MONTHS = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември'];
+  function tick() {
+    const n = new Date();
+    document.getElementById('clockTime').textContent =
+      String(n.getHours()).padStart(2,'0') + ':' +
+      String(n.getMinutes()).padStart(2,'0') + ':' +
+      String(n.getSeconds()).padStart(2,'0');
+    document.getElementById('clockDate').textContent =
+      DAYS[n.getDay()] + ', ' + n.getDate() + ' ' + MONTHS[n.getMonth()] + ' ' + n.getFullYear();
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  /* ── BACKGROUND CROSSFADE ── */
+  const slides = [
+    document.getElementById('bgSlide1'),
+    document.getElementById('bgSlide2')
+  ];
+  let current = 0;
+  function nextSlide() {
+    slides[current].classList.remove('active');
+    current = (current + 1) % slides.length;
+    slides[current].classList.add('active');
+  }
+  setInterval(nextSlide, 25000); // switch every 25 seconds
+
+  /* ── FLOATING PARTICLES ── */
+  const pc = document.getElementById('particles');
+  for (let i = 0; i < 50; i++) {
+    const el  = document.createElement('div');
+    el.className = 'particle';
+    const sz  = 1.2 + Math.random() * 4;
+    const dur = 16 + Math.random() * 22;
+    const del = -(Math.random() * 22);
+    const lft = Math.random() * 100;
+    const op  = 0.10 + Math.random() * 0.45;
+    el.style.cssText = `width:${sz}px;height:${sz}px;left:${lft}%;bottom:-8px;opacity:${op};animation-duration:${dur}s;animation-delay:${del}s`;
+    pc.appendChild(el);
+  }
+</script>
+</body>
+</html>
