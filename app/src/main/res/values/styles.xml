@@ -53,6 +53,18 @@
         <item name="android:layout_marginBottom">4dp</item>
     </style>
 
+    <!-- Settings — small touch tool button (Paste / Clear / Default) -->
+    <style name="ToolButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">52dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginEnd">8dp</item>
+        <item name="android:background">@drawable/input_bg</item>
+        <item name="android:textColor">#00B4D8</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
     <!-- Settings — horizontal divider -->
     <style name="Divider">
         <item name="android:layout_width">match_parent</item>

@@ -10,8 +10,12 @@ android {
         applicationId "com.partpulse.displaylauncher"
         minSdk 21
         targetSdk 34
-        versionCode 32
-        versionName "1.1.0"
+        versionCode 33
+        versionName "1.2.0"
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {

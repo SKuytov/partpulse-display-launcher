@@ -84,4 +84,13 @@ public class AppPrefs {
     // --- Default slide duration (seconds) ---
     public int getDefaultSlideDuration() { return prefs.getInt("default_slide_duration", 10); }
     public void setDefaultSlideDuration(int secs) { prefs.edit().putInt("default_slide_duration", secs).apply(); }
+
+    // --- Daily self-restart hour (0-23, -1 = off). Default 04:00 ---
+    public static final int DEFAULT_RESTART_HOUR = 4;
+    public int getDailyRestartHour() { return prefs.getInt("daily_restart_hour", DEFAULT_RESTART_HOUR); }
+    public void setDailyRestartHour(int hour) { prefs.edit().putInt("daily_restart_hour", hour).apply(); }
+
+    // --- Day key (yyyyMMdd) of the last daily self-restart ---
+    public String getLastRestartDay() { return prefs.getString("last_restart_day", ""); }
+    public void setLastRestartDay(String day) { prefs.edit().putString("last_restart_day", day).commit(); }
 }

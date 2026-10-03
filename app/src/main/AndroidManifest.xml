@@ -62,10 +62,10 @@
         <!-- Settings screen -->
         <activity
             android:name=".SettingsActivity"
-            android:configChanges="orientation|screenSize"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden"
             android:exported="false"
-            android:screenOrientation="landscape"
-            android:windowSoftInputMode="adjustResize" />
+            android:screenOrientation="sensorLandscape"
+            android:windowSoftInputMode="adjustResize|stateHidden" />
 
         <!-- SSE background service — monitors server for content updates -->
         <service

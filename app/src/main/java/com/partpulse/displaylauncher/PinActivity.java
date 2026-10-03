@@ -85,6 +85,9 @@ public class PinActivity extends AppCompatActivity {
             }
         }
 
+        View cancel = findViewById(R.id.btnPinCancel);
+        if (cancel != null) cancel.setOnClickListener(v -> finish());
+
         updateDots();
         highlightCursor();
     }
@@ -116,9 +119,21 @@ public class PinActivity extends AppCompatActivity {
                 pressButton(LABELS[curRow][curCol]);
                 return true;
             case KeyEvent.KEYCODE_BACK:
-                // Block back — PIN must be entered
+                // Cancel — returns to the display (Settings stay locked)
+                finish();
+                return true;
+            case KeyEvent.KEYCODE_DEL:
+                pressButton("⌫");
                 return true;
             default:
+                // Number keys on a remote / hardware keyboard
+                if (event.getKeyCode() >= KeyEvent.KEYCODE_0
+                        && event.getKeyCode() <= KeyEvent.KEYCODE_9) {
+                    pressButton(String.valueOf(event.getKeyCode() - KeyEvent.KEYCODE_0));
+                } else if (event.getKeyCode() >= KeyEvent.KEYCODE_NUMPAD_0
+                        && event.getKeyCode() <= KeyEvent.KEYCODE_NUMPAD_9) {
+                    pressButton(String.valueOf(event.getKeyCode() - KeyEvent.KEYCODE_NUMPAD_0));
+                }
                 return true;
         }
     }
@@ -195,5 +210,5 @@ public class PinActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onBackPressed() { /* blocked */ }
+    public void onBackPressed() { finish(); }
 }

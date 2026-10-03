@@ -84,4 +84,20 @@
 
     </GridLayout>
 
+    <!-- Cancel — touch-friendly way back to the display (tablets have no MENU key) -->
+    <TextView
+        android:id="@+id/btnPinCancel"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:text="Cancel"
+        android:textColor="#9CA3C8"
+        android:textSize="16sp"
+        android:clickable="true"
+        android:focusable="false"
+        android:background="@drawable/input_bg" />
+
 </LinearLayout>

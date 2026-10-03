@@ -57,6 +57,8 @@ public class SseUpdateService extends Service {
     private volatile boolean running = true;
     private volatile Call activeCall;
     private volatile Thread sseThread;
+    private volatile Thread watchdogThread;
+    private volatile Thread pollThread;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private PowerManager.WakeLock wakeLock;
 
@@ -88,17 +90,28 @@ public class SseUpdateService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         running = true;
-        if (sseThread == null || !sseThread.isAlive()) {
-            sseThread = new Thread(this::sseLoop, "SSE-Listener");
-            sseThread.setDaemon(true);
-            sseThread.start();
+        // IMPORTANT: NativeDisplayActivity calls startForegroundService() every 5 minutes as a
+        // health check, and every call lands here. Earlier builds started a NEW watchdog and a
+        // NEW poller thread on every call and never stopped them — ~2000 pollers per week, each
+        // hitting index.php every 3 minutes. That slowly choked the device/server until the app
+        // was restarted (the "every Monday" symptom). Each thread now exists at most once.
+        synchronized (this) {
+            if (sseThread == null || !sseThread.isAlive()) {
+                sseThread = new Thread(this::sseLoop, "SSE-Listener");
+                sseThread.setDaemon(true);
+                sseThread.start();
+            }
+            if (watchdogThread == null || !watchdogThread.isAlive()) {
+                watchdogThread = new Thread(this::watchdogLoop, "SSE-Watchdog");
+                watchdogThread.setDaemon(true);
+                watchdogThread.start();
+            }
+            if (pollThread == null || !pollThread.isAlive()) {
+                pollThread = new Thread(this::pollLoop, "Hash-Poller");
+                pollThread.setDaemon(true);
+                pollThread.start();
+            }
         }
-        Thread watchdog = new Thread(this::watchdogLoop, "SSE-Watchdog");
-        watchdog.setDaemon(true);
-        watchdog.start();
-        Thread poller = new Thread(this::pollLoop, "Hash-Poller");
-        poller.setDaemon(true);
-        poller.start();
         return START_STICKY;
     }
 
@@ -106,6 +119,10 @@ public class SseUpdateService extends Service {
     public void onDestroy() {
         running = false;
         if (activeCall != null) activeCall.cancel();
+        Thread w = watchdogThread, p = pollThread, t = sseThread;
+        if (w != null) w.interrupt();
+        if (p != null) p.interrupt();
+        if (t != null) t.interrupt();
         try {
             if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         } catch (Exception ignored) {}

@@ -21,7 +21,10 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:fillViewport="true"
-        android:padding="24dp">
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="12dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -33,25 +36,79 @@
                 style="@style/SectionHeader"
                 android:text="DISPLAY" />
 
-            <TextView style="@style/FieldLabel" android:text="Display URL" />
+            <TextView style="@style/FieldLabel" android:text="Display URL — tap to edit" />
             <EditText
                 android:id="@+id/etUrl"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textUri"
+                android:minHeight="56dp"
+                android:inputType="textUri|textNoSuggestions"
+                android:imeOptions="actionDone|flagNoExtractUi|flagNoFullscreen"
+                android:singleLine="true"
                 android:textColor="#EEEEFF"
                 android:background="@drawable/input_bg"
-                android:padding="12dp"
-                android:textSize="15sp"
-                android:layout_marginBottom="16dp"
-                android:hint="http://192.168.0.62:5000/#/display"
+                android:padding="14dp"
+                android:textSize="18sp"
+                android:layout_marginBottom="10dp"
+                android:hint="https://skuytov.eu/grafik/index.php"
                 android:textColorHint="#666688" />
 
-            <TextView style="@style/FieldLabel" android:text="Auto-refresh interval" />
+            <!-- URL tools: touch-friendly buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
+
+                <Button
+                    android:id="@+id/btnUrlPaste"
+                    style="@style/ToolButton"
+                    android:text="Paste" />
+
+                <Button
+                    android:id="@+id/btnUrlClear"
+                    style="@style/ToolButton"
+                    android:text="Clear" />
+
+                <Button
+                    android:id="@+id/btnUrlDefault"
+                    style="@style/ToolButton"
+                    android:text="Default" />
+
+                <Button
+                    android:id="@+id/btnUrlTest"
+                    android:layout_width="0dp"
+                    android:layout_height="52dp"
+                    android:layout_weight="1.4"
+                    android:text="Test URL"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
+                    android:textAllCaps="false"
+                    android:background="@drawable/btn_primary" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvUrlStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#9CA3C8"
+                android:textSize="14sp"
+                android:layout_marginBottom="16dp" />
+
+            <TextView style="@style/FieldLabel" android:text="Fallback slide time (used when a slide has no duration)" />
             <Spinner
                 android:id="@+id/spRefresh"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="52dp"
+                android:background="@drawable/input_bg"
+                android:layout_marginBottom="16dp" />
+
+            <TextView style="@style/FieldLabel" android:text="Daily automatic restart (keeps the display fresh)" />
+            <Spinner
+                android:id="@+id/spDailyRestart"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
                 android:background="@drawable/input_bg"
                 android:layout_marginBottom="24dp" />
 
@@ -63,6 +120,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="52dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:layout_marginBottom="8dp">
@@ -73,12 +131,13 @@
                     android:layout_weight="1"
                     android:text="PIN lock for Settings"
                     android:textColor="#CCCCDD"
-                    android:textSize="15sp" />
+                    android:textSize="16sp" />
 
                 <Switch
                     android:id="@+id/swPinEnabled"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:minHeight="48dp"
                     android:thumbTint="#00B4D8"
                     android:trackTint="#334455" />
             </LinearLayout>
@@ -91,12 +150,14 @@
                 android:orientation="vertical"
                 android:visibility="gone">
 
-                <TextView style="@style/FieldLabel" android:text="New PIN (4 digits)" />
+                <TextView style="@style/FieldLabel" android:text="New PIN (4 digits) — leave empty to keep current" />
                 <EditText
                     android:id="@+id/etPin1"
-                    android:layout_width="160dp"
+                    android:layout_width="200dp"
                     android:layout_height="wrap_content"
+                    android:minHeight="52dp"
                     android:inputType="numberPassword"
+                    android:imeOptions="actionNext|flagNoExtractUi|flagNoFullscreen"
                     android:maxLength="4"
                     android:textColor="#EEEEFF"
                     android:background="@drawable/input_bg"
@@ -108,9 +169,11 @@
                 <TextView style="@style/FieldLabel" android:text="Confirm new PIN" />
                 <EditText
                     android:id="@+id/etPin2"
-                    android:layout_width="160dp"
+                    android:layout_width="200dp"
                     android:layout_height="wrap_content"
+                    android:minHeight="52dp"
                     android:inputType="numberPassword"
+                    android:imeOptions="actionDone|flagNoExtractUi|flagNoFullscreen"
                     android:maxLength="4"
                     android:textColor="#EEEEFF"
                     android:background="@drawable/input_bg"
@@ -125,7 +188,7 @@
                     android:layout_height="wrap_content"
                     android:text="PINs do not match"
                     android:textColor="#FF4444"
-                    android:textSize="12sp"
+                    android:textSize="13sp"
                     android:visibility="gone"
                     android:layout_marginBottom="16dp" />
             </LinearLayout>
@@ -138,6 +201,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="52dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:layout_marginBottom="24dp">
@@ -151,22 +215,23 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Show toolbar"
+                        android:text="Show touch bar when the screen is tapped"
                         android:textColor="#CCCCDD"
-                        android:textSize="15sp" />
+                        android:textSize="16sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Auto-hides after 5 seconds"
+                        android:text="Reload / Settings buttons, hide after 6 s. Long-press the screen 1.5 s always opens Settings."
                         android:textColor="#666688"
-                        android:textSize="12sp" />
+                        android:textSize="13sp" />
                 </LinearLayout>
 
                 <Switch
                     android:id="@+id/swToolbar"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:minHeight="48dp"
                     android:thumbTint="#00B4D8"
                     android:trackTint="#334455" />
             </LinearLayout>
@@ -190,11 +255,14 @@
                 android:id="@+id/etWeatherCity"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="52dp"
                 android:inputType="text"
+                android:imeOptions="actionDone|flagNoExtractUi|flagNoFullscreen"
+                android:singleLine="true"
                 android:textColor="#EEEEFF"
                 android:background="@drawable/input_bg"
                 android:padding="12dp"
-                android:textSize="15sp"
+                android:textSize="16sp"
                 android:layout_marginBottom="12dp"
                 android:hint="Ruse"
                 android:textColorHint="#666688" />
@@ -202,10 +270,11 @@
             <Button
                 android:id="@+id/btnRefreshWeather"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="52dp"
                 android:text="Refresh Weather"
                 android:textColor="#FFFFFF"
-                android:textSize="14sp"
+                android:textSize="15sp"
+                android:textAllCaps="false"
                 android:background="@drawable/btn_primary"
                 android:layout_marginBottom="12dp" />
 
@@ -249,22 +318,71 @@
             <Spinner
                 android:id="@+id/spSlideDuration"
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="52dp"
                 android:background="@drawable/input_bg"
                 android:layout_marginBottom="24dp" />
 
-            <!-- Save button -->
+            <View style="@style/Divider" />
+
+            <!-- ── MAINTENANCE SECTION ──────────────────────────── -->
+            <TextView style="@style/SectionHeader" android:text="MAINTENANCE" />
+
             <Button
-                android:id="@+id/btnSave"
+                android:id="@+id/btnReloadNow"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:text="Save Settings"
+                android:text="Re-download all content now"
                 android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:fontFamily="sans-serif-medium"
+                android:textSize="15sp"
+                android:textAllCaps="false"
                 android:background="@drawable/btn_primary"
-                android:layout_marginTop="8dp" />
+                android:layout_marginBottom="12dp" />
+
+            <TextView
+                android:id="@+id/tvVersion"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#666688"
+                android:textSize="13sp"
+                android:layout_marginBottom="12dp" />
 
         </LinearLayout>
     </ScrollView>
+
+    <!-- Fixed bottom bar — always visible, also above the on-screen keyboard -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="#1A1A2E"
+        android:elevation="8dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp">
+
+        <Button
+            android:id="@+id/btnCancel"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="12dp"
+            android:text="Cancel"
+            android:textColor="#00B4D8"
+            android:textSize="16sp"
+            android:textAllCaps="false"
+            android:background="@drawable/input_bg" />
+
+        <Button
+            android:id="@+id/btnSave"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="2"
+            android:text="Save &amp; Reload Display"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textAllCaps="false"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/btn_primary" />
+    </LinearLayout>
 </LinearLayout>
